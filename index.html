@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>מערכת שבצ"ק 967 - פלוגה ב'</title>
+    
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap');
+        body { font-family: 'Assistant', sans-serif; background-color: #f1f5f9; margin: 0; text-align: right; }
+        
+        .mil-table { border: 3px solid #000 !important; border-collapse: collapse; width: 100%; text-align: center; background-color: white; }
+        .mil-table th, .mil-table td { border: 2px solid #000 !important; padding: 8px; font-weight: 700; font-size: 14px; color: #000; height: 45px; }
+        .bg-green-h { background-color: #d9ead3 !important; }
+        .bg-orange-h { background-color: #fce5cd !important; }
+        .bg-yellow-h { background-color: #fff2cc !important; }
+        .bg-magen-h { background-color: #e69138 !important; color: white !important; }
+        .highlight-y { background-color: #ffff00 !important; }
+        
+        .box-cmd { border: 3px solid #000; display: flex; width: 320px; height: 60px; margin-bottom: 15px; background: white; shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        .box-label { background-color: #cfe2f3; width: 130px; border-left: 3px solid #000; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.1em; }
+        .box-val { flex-grow: 1; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.4em; color: #1e40af; }
+        
+        @media print { .no-print { display: none !important; } }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+
+        const App = () => {
+            const [viewMode, setViewMode] = useState('schedule');
+            const [activeDay, setActiveDay] = useState('01.05');
+            const [aiPrompt, setAiPrompt] = useState('');
+            const [aiResponse, setAiResponse] = useState(null);
+
+            const soldiersList = [
+                "נריה בן יורק", "אורן קו", "יאיר נמט", "רון פריינטה", "דולב סעד", 
+                "אפרים זנו", "רמין אלייב", "אוריאל גוטליב", "אוריה דוראני", "אביחי סבן", 
+                "אליהו זנו", "גיא יעק טובול", "אביאל רונסון", "אלכס מאסקיבקר", 
+                "אמתי גלאובר", "מיכאל אטלי", "גל שטרלינג", "שי משה צברי", 
+                "תומר טייבי", "יפתח זילברבוים", "לירון א אביטבול", "אלעד ארונוביץ", 
+                "איתן שפר", "נועם אמיאל", "עידו טייטלבום", "דוד אגילבו", "כפיר ליאוצי", "ניר לחובצקי"
+            ];
+
+            const [memory, setMemory] = useState({
+                rules: [
+                    "סבב מפקדים קבוע: נריה, אורן, יאיר", 
+                    "מנוחה של 24 שעות לאחר קצין מוצב",
+                    "חובת ערכת פריצה בעלייה לעמדה דרומית"
+                ],
+                personnel: {}
+            });
+
+            // פונקציית עזר ליצירת נתונים התחלתיים כדי שהשבצ"ק לא יהיה ריק
+            const createInitialDay = (date, off, sc) => ({
+                title: date,
+                patrol: [
+                    { t: "22:00-06:00", c: "נריה בן יורק", s: ["רועי בנסימון", "עידן אליו"] },
+                    { t: "06:00-14:00", c: "אוריה דוראני", s: ["אלכס מאסקיבקר", "נתנאל עמר"] },
+                    { t: "14:00-22:00", c: "דרור מאיר", s: ["דוד טאג האוקיפ", "דוד מיכ קצין"] }
+                ],
+                defense: [
+                    { t: "22:00-02:00", sg: "ניר לחובצקי", b: "דולב סעד", e: "קרלוס", d: "יהונדב", h: true },
+                    { t: "02:00-06:00", sg: "קול שטרן", b: "דולב סעד", e: "דניאל", d: "אלון", h: true },
+                    { t: "06:00-10:00", sg: "שי משה צברי", b: "אפרים זנו", e: "רון פריינטה", d: "רמין אלייב" },
+                    { t: "10:00-14:00", sg: "זיו פינטו", b: "אביחי סבן", e: "מיכאל אטלי", d: "יפתח זילברבוים" },
+                    { t: "14:00-18:00", sg: "תומר טייבי", b: "אליהו זנו", e: "נועם אמיאל", d: "עידו טייטלבום" },
+                    { t: "18:00-22:00", sg: "גיא יעק טובול", b: "אביאל רונסון", e: "אמתי גלאובר", d: "איתן שפר" }
+                ],
+                magen: [["איתמר צורף", "עידו טייטלבום"], ["מיכאל אופנהיימר", "כפיר ליאוצי"], ["שניאור משה", "נדב לוגסי"]],
+                carmel: [
+                    { t: "22:00-06:00", c: "רם פז", s: ["דוד אגילבו", "נדב לוגסי", "מיכאל אטלי"] },
+                    { t: "06:00-14:00", c: "רם פז", s: ["אלון", "אווקה", "שי משה"] }
+                ],
+                officer: off, scout: sc, bottomNote: "נא להקפיד על דריכות מלאה וערכות פריצה"
+            });
+
+            const [scheduleData, setScheduleData] = useState({
+                '28.04': createInitialDay("28.04", "נריה בן יורק", "אלעד ארונוביץ"),
+                '29.04': createInitialDay("29.04", "אלעד ארונוביץ", "גיא יעק טובול"),
+                '30.04': createInitialDay("30.04", "איתן שפר", "צור בן אדמון"),
+                '01.05': createInitialDay("01.05", "אוריה דוראני", "נועם אמיאל"),
+                '02.05': createInitialDay("02.05", "דרור מאיר", "אפרים זנו"),
+                '03.05': createInitialDay("03.05", "אורן קו", "זיו פינטו")
+            });
+
+            // מנוע AI מקומי משופר לביצוע שינויים אמיתיים
+            const processAI = () => {
+                const cmd = aiPrompt.trim().toLowerCase();
+                let newData = { ...scheduleData };
+                let newMem = { ...memory };
+                let feedback = "הפקודה בוצעה.";
+
+                // 1. יכולת החלפה (החלף את X ב-Y)
+                if (cmd.includes("החלף") || cmd.includes("תחליף")) {
+                    const foundSoldiers = soldiersList.filter(s => cmd.includes(s.toLowerCase()));
+                    if (foundSoldiers.length >= 2) {
+                        const [s1, s2] = foundSoldiers;
+                        const day = { ...newData[activeDay] };
+                        
+                        const swapInArray = (arr) => arr.map(item => {
+                            let newItem = { ...item };
+                            if (newItem.c === s1) newItem.c = s2;
+                            else if (newItem.c === s2) newItem.c = s1;
+                            if (newItem.s) newItem.s = newItem.s.map(s => s === s1 ? s2 : s === s2 ? s1 : s);
+                            if (newItem.sg === s1) newItem.sg = s2; else if (newItem.sg === s2) newItem.sg = s1;
+                            if (newItem.b === s1) newItem.b = s2; else if (newItem.b === s2) newItem.b = s1;
+                            if (newItem.e === s1) newItem.e = s2; else if (newItem.e === s2) newItem.e = s1;
+                            if (newItem.d === s1) newItem.d = s2; else if (newItem.d === s2) newItem.d = s1;
+                            return newItem;
+                        });
+
+                        day.patrol = swapInArray(day.patrol);
+                        day.defense = swapInArray(day.defense);
+                        day.carmel = swapInArray(day.carmel);
+                        if (day.officer === s1) day.officer = s2; else if (day.officer === s2) day.officer = s1;
+                        if (day.scout === s1) day.scout = s2; else if (day.scout === s2) day.scout = s1;
+
+                        newData[activeDay] = day;
+                        feedback = `בוצע: החלפה בין ${s1} ל-${s2} ביום ${activeDay}.`;
+                    }
+                }
+                // 2. מי יכול להחליף
+                else if (cmd.includes("מי יכול להחליף") || cmd.includes("חלופה")) {
+                    const day = newData[activeDay];
+                    const busy = new Set();
+                    [...(day.patrol||[]), ...(day.defense||[]), ...(day.carmel||[])].forEach(m => {
+                        if(m.c) busy.add(m.c); if(m.s) m.s.forEach(s => busy.add(s));
+                        if(m.sg) busy.add(m.sg); if(m.b) busy.add(m.b); if(m.e) busy.add(m.e); if(m.d) busy.add(m.d);
+                    });
+                    const avail = soldiersList.filter(s => !busy.has(s)).slice(0, 5);
+                    feedback = `לוחמים פנויים ב-${activeDay}: ${avail.join(", ")}`;
+                }
+                // 3. הוספת יום חדש
+                else if (cmd.includes("הוסף יום") || cmd.includes("תאריך חדש")) {
+                    const date = cmd.match(/\d{2}\.\d{2}/)?.[0] || "04.05";
+                    newData[date] = createInitialDay(date, "ממתין", "ממתין");
+                    setActiveDay(date);
+                    feedback = `יום ${date} נוסף למערכת.`;
+                }
+                // 4. סטטוס בבית
+                else if (cmd.includes("בבית") || cmd.includes("יצא")) {
+                    const name = soldiersList.find(s => cmd.includes(s.toLowerCase()));
+                    if (name) {
+                        newMem.personnel[name] = "בבית";
+                        feedback = `${name} עודכן כנמצא בבית בזיכרון.`;
+                    }
+                }
+
+                setScheduleData(newData);
+                setMemory(newMem);
+                setAiResponse(feedback);
+                setAiPrompt('');
+                setTimeout(() => setAiResponse(null), 8000);
+            };
+
+            const sortedDates = useMemo(() => Object.keys(scheduleData).sort((a,b) => {
+                const [da, ma] = a.split('.').map(Number); const [db, mb] = b.split('.').map(Number);
+                return ma !== mb ? ma - mb : da - db;
+            }), [scheduleData]);
+
+            const fullReport = useMemo(() => {
+                const report = {};
+                soldiersList.forEach(n => { report[n] = { days: {}, totalGuard: 0 }; sortedDates.forEach(d => report[n].days[d] = 0); });
+                Object.entries(scheduleData).forEach(([date, day]) => {
+                    day.patrol?.forEach(p => {
+                        if(report[p.c]) report[p.c].days[date] += 8;
+                        p.s?.forEach(s => { if(report[s]) report[s].days[date] += 8; });
+                    });
+                    day.defense?.forEach(d => {
+                        [d.sg, d.b, d.e, d.d].forEach(n => { if(report[n]) report[n].days[date] += 4; });
+                    });
+                });
+                soldiersList.forEach(n => report[n].totalGuard = Object.values(report[n].days).reduce((a,b)=>a+b, 0));
+                return report;
+            }, [scheduleData, sortedDates]);
+
+            const exportToWhatsapp = () => {
+                html2canvas(document.getElementById('capture-area'), { scale: 2 }).then(canvas => {
+                    const link = document.createElement('a');
+                    link.download = `שבצק_${activeDay}.png`;
+                    link.href = canvas.toDataURL();
+                    link.click();
+                    window.open('https://web.whatsapp.com/', '_blank');
+                });
+            };
+
+            const currentDay = scheduleData[activeDay] || scheduleData[sortedDates[0]];
+
+            return (
+                <div className="min-h-screen pb-24">
+                    {/* Header & Tabs */}
+                    <div className="bg-slate-900 text-white p-6 no-print shadow-2xl sticky top-0 z-50">
+                        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+                            <div className="flex items-center gap-4">
+                                <div className="bg-indigo-600 p-3 rounded-xl font-black text-2xl italic shadow-lg">967</div>
+                                <h1 className="text-3xl font-black italic tracking-tighter">ניהול שבצ"ק פלוגה ב'</h1>
+                            </div>
+                            <div className="flex bg-slate-800 p-1.5 rounded-2xl gap-1">
+                                <button onClick={()=>setViewMode('schedule')} className={`px-10 py-3 rounded-xl font-bold transition ${viewMode==='schedule'?'bg-indigo-600 shadow-lg':'text-slate-400'}`}>שבצ"ק</button>
+                                <button onClick={()=>setViewMode('report')} className={`px-10 py-3 rounded-xl font-bold transition ${viewMode==='report'?'bg-indigo-600 shadow-lg':'text-slate-400'}`}>דוח אקסל</button>
+                                <button onClick={()=>setViewMode('memory')} className={`px-10 py-3 rounded-xl font-bold transition ${viewMode==='memory'?'bg-indigo-600 shadow-lg':'text-slate-400'}`}>זיכרון AI</button>
+                            </div>
+                        </div>
+                        {/* AI Input Area */}
+                        <div className="max-w-7xl mx-auto mt-8 flex gap-4 items-center">
+                            <div className="flex-grow relative">
+                                <textarea value={aiPrompt} onChange={e=>setAiPrompt(e.target.value)} placeholder="הזן פקודה חכמה (למשל: החלף את נריה בן יורק באורן קו, מי יכול להחליף את אוריה?, הוסף יום 04.05)..." className="w-full bg-slate-800 p-4 rounded-2xl text-white font-bold h-16 resize-none border-none focus:ring-4 focus:ring-indigo-500/50 shadow-inner" />
+                                {aiResponse && <div className="absolute top-[-50px] right-0 bg-indigo-500 text-white px-6 py-2 rounded-2xl text-sm font-black shadow-2xl border-2 border-white animate-bounce">{aiResponse}</div>}
+                            </div>
+                            <button onClick={processAI} className="bg-white text-slate-900 px-12 rounded-2xl font-black hover:bg-indigo-400 hover:text-white transition transform active:scale-95 h-16 shadow-xl">עדכון חכם</button>
+                        </div>
+                    </div>
+
+                    {/* View: Schedule */}
+                    {viewMode === 'schedule' && (
+                        <div className="max-w-[1400px] mx-auto p-4 md:p-10">
+                            <div className="mb-10 flex flex-wrap justify-between items-center no-print gap-4">
+                                <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                                    {sortedDates.map(d => (
+                                        <button key={d} onClick={()=>setActiveDay(d)} className={`px-8 py-3 rounded-2xl font-black text-sm border-2 transition ${activeDay===d?'bg-indigo-600 text-white border-indigo-600 shadow-xl translate-y-[-2px]':'bg-white text-slate-500 hover:border-indigo-300'}`}>{d}</button>
+                                    ))}
+                                </div>
+                                <button onClick={exportToWhatsapp} className="bg-emerald-500 text-white px-12 py-4 rounded-3xl font-black shadow-2xl hover:bg-emerald-600 transition flex items-center gap-2">
+                                    <span className="text-xl">הורדה ושיתוף לווצאפ</span>
+                                </button>
+                            </div>
+
+                            <div id="capture-area" className="bg-white p-12 md:p-20 shadow-2xl border-[15px] border-slate-100 rounded-[4rem] text-black relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-40 h-40 bg-slate-50 rounded-bl-full opacity-50"></div>
+                                <h1 className="text-8xl font-black text-center mb-20 tracking-tighter italic border-b-[10px] border-slate-900 pb-12 uppercase">שבצ"ק פלוגה ב' - {activeDay}</h1>
+                                
+                                <div className="grid grid-cols-12 gap-16 text-right" dir="rtl">
+                                    {/* 1. Siyur Section */}
+                                    <div className="col-span-12 lg:col-span-5">
+                                        <h3 className="text-4xl font-black text-center mb-4 italic underline bg-emerald-600 text-white py-3 rounded-t-3xl border-x-4 border-t-4 border-slate-900 uppercase">משימת סיור</h3>
+                                        <table className="mil-table"><thead className="bg-green-h"><tr><th>זמן</th><th>מפקד</th><th colSpan="2">צוות לוחמים</th></tr></thead>
+                                        <tbody>{(currentDay.patrol||[]).map((r,i)=><tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td className="text-indigo-800 text-xl font-black">{r.c}</td><td>{r.s[0]}</td><td>{r.s[1]}</td></tr>)}</tbody></table>
+                                    </div>
+                                    {/* 2. Defense Section */}
+                                    <div className="col-span-12 lg:col-span-7">
+                                        <h3 className="text-4xl font-black text-center mb-4 italic underline bg-orange-600 text-white py-3 rounded-t-3xl border-x-4 border-t-4 border-slate-900 uppercase">הגנת מחנה</h3>
+                                        <table className="mil-table"><thead className="bg-orange-h"><tr><th>זמן</th><th>ש.ג.</th><th>בונקר</th><th>מזרחית</th><th>דרומית</th></tr></thead>
+                                        <tbody>{(currentDay.defense||[]).map((r,i)=><tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td>{r.sg}</td><td className={r.h?'highlight-y':''}>{r.b}</td><td>{r.e}</td><td>{r.d}</td></tr>)}</tbody></table>
+                                    </div>
+                                    {/* 3. Command Section */}
+                                    <div className="col-span-12 lg:col-span-4 mt-12 flex flex-col gap-6">
+                                        <div className="box-cmd"><div className="box-label">קצין מוצב</div><div className="box-val">{currentDay.officer}</div></div>
+                                        <div className="box-cmd opacity-80"><div className="box-label bg-slate-200">כונן גשש</div><div className="box-val">{currentDay.scout}</div></div>
+                                        <p className="pr-6 text-slate-400 font-black text-lg italic tracking-widest uppercase">סבב פיקוד מתבצע ב-22:00</p>
+                                    </div>
+                                    {/* 4. Magen Shomron */}
+                                    <div className="col-span-12 lg:col-span-3 mt-12">
+                                        <div className="flex justify-between items-end mb-4 px-2"><h3 className="text-3xl font-black underline italic">מגן השומרון</h3><span className="text-sm font-black text-orange-600 bg-orange-50 px-3 py-1 rounded-full border border-orange-200 shadow-sm">חילוף 14:00</span></div>
+                                        <table className="mil-table"><thead className="bg-magen-h"><tr><th colSpan="2" className="py-4">צוות כוננות</th></tr></thead><tbody className="text-xl">{(currentDay.magen||[]).map((m,i)=><tr key={i}><td className="border-l-4 border-slate-900">{m[1]}</td><td>{m[0]}</td></tr>)}</tbody></table>
+                                    </div>
+                                    {/* 5. Carmel Section */}
+                                    <div className="col-span-12 lg:col-span-5 mt-12">
+                                        <h3 className="text-4xl font-black text-center mb-4 italic underline bg-yellow-500 text-black py-3 rounded-t-3xl border-x-4 border-t-4 border-slate-900 uppercase">משימת כרמל</h3>
+                                        <table className="mil-table"><thead className="bg-yellow-h"><tr><th>זמן</th><th>מפקד</th><th colSpan="3">לוחמים</th></tr></thead>
+                                        <tbody>{(currentDay.carmel||[]).map((r,i)=><tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td className="text-indigo-800 text-xl font-black">{r.c}</td><td>{r.s[0]}</td><td>{r.s[1]}</td><td>{r.s[2]}</td></tr>)}</tbody></table>
+                                    </div>
+                                </div>
+                                <div className="mt-32 text-center font-black text-4xl italic text-slate-400 border-t-8 border-slate-100 pt-16 tracking-tight">"{currentDay.bottomNote}"</div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* View: Report (Excel Style) */}
+                    {viewMode === 'report' && (
+                        <div className="max-w-[1450px] mx-auto p-10 bg-white mt-10 rounded-[3rem] shadow-2xl overflow-x-auto text-black border-8 border-slate-100">
+                            <h2 className="text-6xl font-black mb-12 border-b-8 border-indigo-500 pb-6 text-indigo-900 tracking-tighter italic">דוח ריכוז שעות שבועי (שמירה / מנוחה)</h2>
+                            <table className="mil-table w-full">
+                                <thead className="bg-slate-900 text-white font-black text-lg">
+                                    <tr>
+                                        <th className="p-8 sticky right-0 bg-slate-900 z-10 text-right text-2xl border-l-8 border-indigo-500">שם הלוחם</th>
+                                        {sortedDates.map(date => <th key={date} className="p-4 text-base">{date}</th>)}
+                                        <th className="bg-emerald-700 p-8 text-2xl">סה"כ שמירה</th>
+                                        <th className="bg-blue-700 p-8 text-2xl">סה"כ מנוחה</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {soldiersList.sort().map(name => {
+                                        const stats = fullReport[name] || { days: {}, totalGuard: 0 };
+                                        const totalPossible = sortedDates.length * 24;
+                                        return (
+                                            <tr key={name} className="hover:bg-indigo-50 transition-colors font-black">
+                                                <td className="p-6 sticky right-0 bg-white text-right border-l-4 border-slate-200 shadow-xl text-xl italic">{name}</td>
+                                                {sortedDates.map(date => (<td key={date} className="font-mono text-base text-slate-600 bg-slate-50/30">{stats.days[date]} / {24-stats.days[date]}</td>))}
+                                                <td className="bg-emerald-50 text-emerald-800 text-2xl font-black border-l-4 border-slate-900">{stats.totalGuard} ש'</td>
+                                                <td className="bg-blue-50 text-blue-800 text-2xl font-black">{totalPossible - stats.totalGuard} ש'</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* View: Memory */}
+                    {viewMode === 'memory' && (
+                        <div className="max-w-7xl mx-auto p-12 bg-white mt-10 rounded-[3rem] shadow-2xl text-black border-8 border-slate-100">
+                            <h2 className="text-5xl font-black mb-16 border-b-8 border-indigo-500 pb-6 text-indigo-900 italic tracking-tighter uppercase">זיכרון מערכת וסטטוס כוח אדם</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-16">
+                                <div className="space-y-8">
+                                    <h3 className="text-4xl font-black text-slate-800 underline uppercase italic border-r-8 border-indigo-500 pr-6">חוקים שנלמדו</h3>
+                                    {memory.rules.map((rule, i) => (<div key={i} className="p-8 bg-indigo-50 rounded-[2rem] border-r-[12px] border-indigo-500 font-bold text-indigo-900 text-2xl shadow-xl italic transform hover:scale-105 transition">{rule}</div>))}
+                                </div>
+                                <div className="space-y-8">
+                                    <h3 className="text-4xl font-black text-slate-800 underline uppercase italic border-r-8 border-emerald-500 pr-6">מצב לוחמים נוכחי</h3>
+                                    <div className="grid gap-4 max-h-[650px] overflow-auto no-scrollbar p-2">
+                                        {soldiersList.sort().map(name => {
+                                            const status = memory.personnel[name] || "בבסיס";
+                                            return (
+                                                <div key={name} className="flex justify-between items-center p-8 bg-slate-50 rounded-3xl border-2 border-slate-100 hover:bg-white transition-all shadow-lg group">
+                                                    <span className="font-black text-3xl text-slate-800 group-hover:text-indigo-600 transition-colors italic">{name}</span>
+                                                    <span className={`px-12 py-3 rounded-full font-black text-xl shadow-2xl transform group-hover:scale-110 transition ${status === 'בבית' ? 'bg-red-500 text-white' : 'bg-emerald-600 text-white'}`}>{status}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
