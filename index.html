@@ -10,6 +10,32 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- Firebase -->
+    <script type="module" id="firebase-init">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBM4Fxan8bnJPC_2kwpcxuTsTE4iJbKDTo",
+            authDomain: "miluim-schedule.firebaseapp.com",
+            projectId: "miluim-schedule",
+            storageBucket: "miluim-schedule.firebasestorage.app",
+            messagingSenderId: "308536975907",
+            appId: "1:308536975907:web:d6714d2c9a8c8d7c614796"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        window._firebaseDb = db;
+        window._firebaseDoc = doc;
+        window._firebaseSetDoc = setDoc;
+        window._firebaseGetDoc = getDoc;
+        window._firebaseOnSnapshot = onSnapshot;
+        window._firebaseReady = true;
+        window.dispatchEvent(new Event('firebaseReady'));
+    </script>
     
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap');
@@ -30,19 +56,53 @@
         @media print { .no-print { display: none !important; } }
         .custom-scrollbar::-webkit-scrollbar { width: 8px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+        .sync-indicator { position: fixed; bottom: 20px; left: 20px; padding: 8px 16px; border-radius: 999px; font-weight: 800; font-size: 13px; z-index: 9999; transition: all 0.3s; }
+        .sync-saving { background: #f59e0b; color: white; }
+        .sync-saved  { background: #10b981; color: white; }
+        .sync-error  { background: #ef4444; color: white; }
+        .sync-loading { background: #6366f1; color: white; }
     </style>
 </head>
 <body>
     <div id="root"></div>
+    <div id="sync-status" class="sync-indicator sync-loading">⏳ מתחבר לענן...</div>
 
     <script type="text/babel">
-        const { useState, useMemo, useEffect } = React;
+        const { useState, useMemo, useEffect, useRef } = React;
+
+        // ── Firebase helpers (filled once firebaseReady fires) ──
+        let db, fbDoc, fbSetDoc, fbGetDoc, fbOnSnapshot;
+        const DATA_DOC  = 'schedule';
+        const MEM_DOC   = 'memory';
+
+        function setSyncStatus(type, msg) {
+            const el = document.getElementById('sync-status');
+            if (!el) return;
+            el.className = `sync-indicator sync-${type}`;
+            el.textContent = msg;
+        }
+
+        async function saveToCloud(collection, id, data) {
+            if (!db) return;
+            try {
+                setSyncStatus('saving', '💾 שומר...');
+                await fbSetDoc(fbDoc(db, collection, id), data);
+                setSyncStatus('saved', '✅ נשמר בענן');
+                setTimeout(() => setSyncStatus('saved', '✅ מסונכרן'), 1500);
+            } catch(e) {
+                setSyncStatus('error', '❌ שגיאת שמירה');
+                console.error(e);
+            }
+        }
 
         const App = () => {
-            const [viewMode, setViewMode] = useState('schedule');
-            const [activeDay, setActiveDay] = useState('01.05');
-            const [aiPrompt, setAiPrompt] = useState('');
+            const [viewMode, setViewMode]     = useState('schedule');
+            const [activeDay, setActiveDay]   = useState('01.05');
+            const [aiPrompt, setAiPrompt]     = useState('');
             const [aiResponse, setAiResponse] = useState(null);
+            const [fbReady, setFbReady]       = useState(false);
+            const firstLoad = useRef(true);
 
             const soldiersList = [
                 "נריה בן יורק", "אורן קו", "יאיר נמט", "רון פריינטה", "דולב סעד", 
@@ -53,16 +113,6 @@
                 "איתן שפר", "נועם אמיאל", "עידו טייטלבום", "דוד אגילבו", "כפיר ליאוצי", "ניר לחובצקי"
             ];
 
-            const [memory, setMemory] = useState({
-                rules: [
-                    "סבב מפקדים קבוע: נריה, אורן, יאיר", 
-                    "מנוחה של 24 שעות לאחר קצין מוצב",
-                    "חובת ערכת פריצה בעלייה לעמדה דרומית"
-                ],
-                personnel: {}
-            });
-
-            // פונקציית עזר ליצירת נתונים התחלתיים כדי שהשבצ"ק לא יהיה ריק
             const createInitialDay = (date, off, sc) => ({
                 title: date,
                 patrol: [
@@ -86,33 +136,90 @@
                 officer: off, scout: sc, bottomNote: "נא להקפיד על דריכות מלאה וערכות פריצה"
             });
 
-            const [scheduleData, setScheduleData] = useState({
+            const initialSchedule = {
                 '28.04': createInitialDay("28.04", "נריה בן יורק", "אלעד ארונוביץ"),
                 '29.04': createInitialDay("29.04", "אלעד ארונוביץ", "גיא יעק טובול"),
                 '30.04': createInitialDay("30.04", "איתן שפר", "צור בן אדמון"),
                 '01.05': createInitialDay("01.05", "אוריה דוראני", "נועם אמיאל"),
                 '02.05': createInitialDay("02.05", "דרור מאיר", "אפרים זנו"),
                 '03.05': createInitialDay("03.05", "אורן קו", "זיו פינטו")
-            });
+            };
 
-            // מנוע AI מקומי משופר לביצוע שינויים אמיתיים
+            const initialMemory = {
+                rules: [
+                    "סבב מפקדים קבוע: נריה, אורן, יאיר", 
+                    "מנוחה של 24 שעות לאחר קצין מוצב",
+                    "חובת ערכת פריצה בעלייה לעמדה דרומית"
+                ],
+                personnel: {}
+            };
+
+            const [scheduleData, setScheduleData] = useState(initialSchedule);
+            const [memory, setMemory]             = useState(initialMemory);
+
+            // ── Connect to Firebase once it's ready ──
+            useEffect(() => {
+                const init = () => {
+                    db           = window._firebaseDb;
+                    fbDoc        = window._firebaseDoc;
+                    fbSetDoc     = window._firebaseSetDoc;
+                    fbGetDoc     = window._firebaseGetDoc;
+                    fbOnSnapshot = window._firebaseOnSnapshot;
+                    setFbReady(true);
+                    setSyncStatus('loading', '⏳ טוען נתונים...');
+
+                    // Listen to schedule changes in real-time
+                    fbOnSnapshot(fbDoc(db, 'pluga', DATA_DOC), (snap) => {
+                        if (snap.exists()) {
+                            setScheduleData(snap.data().schedule);
+                            setSyncStatus('saved', '✅ מסונכרן');
+                        } else {
+                            // First time — save defaults to cloud
+                            saveToCloud('pluga', DATA_DOC, { schedule: initialSchedule });
+                        }
+                        firstLoad.current = false;
+                    });
+
+                    // Listen to memory changes in real-time
+                    fbOnSnapshot(fbDoc(db, 'pluga', MEM_DOC), (snap) => {
+                        if (snap.exists()) setMemory(snap.data().memory);
+                    });
+                };
+
+                if (window._firebaseReady) { init(); }
+                else { window.addEventListener('firebaseReady', init, { once: true }); }
+            }, []);
+
+            // ── Save schedule to cloud whenever it changes ──
+            useEffect(() => {
+                if (!fbReady || firstLoad.current) return;
+                const timer = setTimeout(() => {
+                    saveToCloud('pluga', DATA_DOC, { schedule: scheduleData });
+                }, 800); // debounce
+                return () => clearTimeout(timer);
+            }, [scheduleData, fbReady]);
+
+            // ── Save memory to cloud whenever it changes ──
+            useEffect(() => {
+                if (!fbReady || firstLoad.current) return;
+                saveToCloud('pluga', MEM_DOC, { memory });
+            }, [memory, fbReady]);
+
+            // ── AI Engine ──
             const processAI = () => {
                 const cmd = aiPrompt.trim().toLowerCase();
                 let newData = { ...scheduleData };
                 let newMem = { ...memory };
                 let feedback = "הפקודה בוצעה.";
 
-                // 1. יכולת החלפה (החלף את X ב-Y)
                 if (cmd.includes("החלף") || cmd.includes("תחליף")) {
                     const foundSoldiers = soldiersList.filter(s => cmd.includes(s.toLowerCase()));
                     if (foundSoldiers.length >= 2) {
                         const [s1, s2] = foundSoldiers;
                         const day = { ...newData[activeDay] };
-                        
                         const swapInArray = (arr) => arr.map(item => {
                             let newItem = { ...item };
-                            if (newItem.c === s1) newItem.c = s2;
-                            else if (newItem.c === s2) newItem.c = s1;
+                            if (newItem.c === s1) newItem.c = s2; else if (newItem.c === s2) newItem.c = s1;
                             if (newItem.s) newItem.s = newItem.s.map(s => s === s1 ? s2 : s === s2 ? s1 : s);
                             if (newItem.sg === s1) newItem.sg = s2; else if (newItem.sg === s2) newItem.sg = s1;
                             if (newItem.b === s1) newItem.b = s2; else if (newItem.b === s2) newItem.b = s1;
@@ -120,19 +227,15 @@
                             if (newItem.d === s1) newItem.d = s2; else if (newItem.d === s2) newItem.d = s1;
                             return newItem;
                         });
-
                         day.patrol = swapInArray(day.patrol);
                         day.defense = swapInArray(day.defense);
                         day.carmel = swapInArray(day.carmel);
                         if (day.officer === s1) day.officer = s2; else if (day.officer === s2) day.officer = s1;
                         if (day.scout === s1) day.scout = s2; else if (day.scout === s2) day.scout = s1;
-
                         newData[activeDay] = day;
                         feedback = `בוצע: החלפה בין ${s1} ל-${s2} ביום ${activeDay}.`;
                     }
-                }
-                // 2. מי יכול להחליף
-                else if (cmd.includes("מי יכול להחליף") || cmd.includes("חלופה")) {
+                } else if (cmd.includes("מי יכול להחליף") || cmd.includes("חלופה")) {
                     const day = newData[activeDay];
                     const busy = new Set();
                     [...(day.patrol||[]), ...(day.defense||[]), ...(day.carmel||[])].forEach(m => {
@@ -141,21 +244,14 @@
                     });
                     const avail = soldiersList.filter(s => !busy.has(s)).slice(0, 5);
                     feedback = `לוחמים פנויים ב-${activeDay}: ${avail.join(", ")}`;
-                }
-                // 3. הוספת יום חדש
-                else if (cmd.includes("הוסף יום") || cmd.includes("תאריך חדש")) {
+                } else if (cmd.includes("הוסף יום") || cmd.includes("תאריך חדש")) {
                     const date = cmd.match(/\d{2}\.\d{2}/)?.[0] || "04.05";
                     newData[date] = createInitialDay(date, "ממתין", "ממתין");
                     setActiveDay(date);
                     feedback = `יום ${date} נוסף למערכת.`;
-                }
-                // 4. סטטוס בבית
-                else if (cmd.includes("בבית") || cmd.includes("יצא")) {
+                } else if (cmd.includes("בבית") || cmd.includes("יצא")) {
                     const name = soldiersList.find(s => cmd.includes(s.toLowerCase()));
-                    if (name) {
-                        newMem.personnel[name] = "בבית";
-                        feedback = `${name} עודכן כנמצא בבית בזיכרון.`;
-                    }
+                    if (name) { newMem.personnel[name] = "בבית"; feedback = `${name} עודכן כנמצא בבית.`; }
                 }
 
                 setScheduleData(newData);
@@ -200,7 +296,7 @@
 
             return (
                 <div className="min-h-screen pb-24">
-                    {/* Header & Tabs */}
+                    {/* Header */}
                     <div className="bg-slate-900 text-white p-6 no-print shadow-2xl sticky top-0 z-50">
                         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
                             <div className="flex items-center gap-4">
@@ -213,7 +309,6 @@
                                 <button onClick={()=>setViewMode('memory')} className={`px-10 py-3 rounded-xl font-bold transition ${viewMode==='memory'?'bg-indigo-600 shadow-lg':'text-slate-400'}`}>זיכרון AI</button>
                             </div>
                         </div>
-                        {/* AI Input Area */}
                         <div className="max-w-7xl mx-auto mt-8 flex gap-4 items-center">
                             <div className="flex-grow relative">
                                 <textarea value={aiPrompt} onChange={e=>setAiPrompt(e.target.value)} placeholder="הזן פקודה חכמה (למשל: החלף את נריה בן יורק באורן קו, מי יכול להחליף את אוריה?, הוסף יום 04.05)..." className="w-full bg-slate-800 p-4 rounded-2xl text-white font-bold h-16 resize-none border-none focus:ring-4 focus:ring-indigo-500/50 shadow-inner" />
@@ -236,36 +331,29 @@
                                     <span className="text-xl">הורדה ושיתוף לווצאפ</span>
                                 </button>
                             </div>
-
                             <div id="capture-area" className="bg-white p-12 md:p-20 shadow-2xl border-[15px] border-slate-100 rounded-[4rem] text-black relative overflow-hidden">
                                 <div className="absolute top-0 right-0 w-40 h-40 bg-slate-50 rounded-bl-full opacity-50"></div>
                                 <h1 className="text-8xl font-black text-center mb-20 tracking-tighter italic border-b-[10px] border-slate-900 pb-12 uppercase">שבצ"ק פלוגה ב' - {activeDay}</h1>
-                                
                                 <div className="grid grid-cols-12 gap-16 text-right" dir="rtl">
-                                    {/* 1. Siyur Section */}
                                     <div className="col-span-12 lg:col-span-5">
                                         <h3 className="text-4xl font-black text-center mb-4 italic underline bg-emerald-600 text-white py-3 rounded-t-3xl border-x-4 border-t-4 border-slate-900 uppercase">משימת סיור</h3>
                                         <table className="mil-table"><thead className="bg-green-h"><tr><th>זמן</th><th>מפקד</th><th colSpan="2">צוות לוחמים</th></tr></thead>
                                         <tbody>{(currentDay.patrol||[]).map((r,i)=><tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td className="text-indigo-800 text-xl font-black">{r.c}</td><td>{r.s[0]}</td><td>{r.s[1]}</td></tr>)}</tbody></table>
                                     </div>
-                                    {/* 2. Defense Section */}
                                     <div className="col-span-12 lg:col-span-7">
                                         <h3 className="text-4xl font-black text-center mb-4 italic underline bg-orange-600 text-white py-3 rounded-t-3xl border-x-4 border-t-4 border-slate-900 uppercase">הגנת מחנה</h3>
                                         <table className="mil-table"><thead className="bg-orange-h"><tr><th>זמן</th><th>ש.ג.</th><th>בונקר</th><th>מזרחית</th><th>דרומית</th></tr></thead>
                                         <tbody>{(currentDay.defense||[]).map((r,i)=><tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td>{r.sg}</td><td className={r.h?'highlight-y':''}>{r.b}</td><td>{r.e}</td><td>{r.d}</td></tr>)}</tbody></table>
                                     </div>
-                                    {/* 3. Command Section */}
                                     <div className="col-span-12 lg:col-span-4 mt-12 flex flex-col gap-6">
                                         <div className="box-cmd"><div className="box-label">קצין מוצב</div><div className="box-val">{currentDay.officer}</div></div>
                                         <div className="box-cmd opacity-80"><div className="box-label bg-slate-200">כונן גשש</div><div className="box-val">{currentDay.scout}</div></div>
                                         <p className="pr-6 text-slate-400 font-black text-lg italic tracking-widest uppercase">סבב פיקוד מתבצע ב-22:00</p>
                                     </div>
-                                    {/* 4. Magen Shomron */}
                                     <div className="col-span-12 lg:col-span-3 mt-12">
                                         <div className="flex justify-between items-end mb-4 px-2"><h3 className="text-3xl font-black underline italic">מגן השומרון</h3><span className="text-sm font-black text-orange-600 bg-orange-50 px-3 py-1 rounded-full border border-orange-200 shadow-sm">חילוף 14:00</span></div>
                                         <table className="mil-table"><thead className="bg-magen-h"><tr><th colSpan="2" className="py-4">צוות כוננות</th></tr></thead><tbody className="text-xl">{(currentDay.magen||[]).map((m,i)=><tr key={i}><td className="border-l-4 border-slate-900">{m[1]}</td><td>{m[0]}</td></tr>)}</tbody></table>
                                     </div>
-                                    {/* 5. Carmel Section */}
                                     <div className="col-span-12 lg:col-span-5 mt-12">
                                         <h3 className="text-4xl font-black text-center mb-4 italic underline bg-yellow-500 text-black py-3 rounded-t-3xl border-x-4 border-t-4 border-slate-900 uppercase">משימת כרמל</h3>
                                         <table className="mil-table"><thead className="bg-yellow-h"><tr><th>זמן</th><th>מפקד</th><th colSpan="3">לוחמים</th></tr></thead>
@@ -277,7 +365,7 @@
                         </div>
                     )}
 
-                    {/* View: Report (Excel Style) */}
+                    {/* View: Report */}
                     {viewMode === 'report' && (
                         <div className="max-w-[1450px] mx-auto p-10 bg-white mt-10 rounded-[3rem] shadow-2xl overflow-x-auto text-black border-8 border-slate-100">
                             <h2 className="text-6xl font-black mb-12 border-b-8 border-indigo-500 pb-6 text-indigo-900 tracking-tighter italic">דוח ריכוז שעות שבועי (שמירה / מנוחה)</h2>
