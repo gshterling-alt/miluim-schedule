@@ -128,7 +128,7 @@
                     { t: "14:00-18:00", sg: "תומר טייבי", b: "אליהו זנו", e: "נועם אמיאל", d: "עידו טייטלבום" },
                     { t: "18:00-22:00", sg: "גיא יעק טובול", b: "אביאל רונסון", e: "אמתי גלאובר", d: "איתן שפר" }
                 ],
-                magen: [["איתמר צורף", "עידו טייטלבום"], ["מיכאל אופנהיימר", "כפיר ליאוצי"], ["שניאור משה", "נדב לוגסי"]],
+                magen: [{a:"איתמר צורף", b:"עידו טייטלבום"}, {a:"מיכאל אופנהיימר", b:"כפיר ליאוצי"}, {a:"שניאור משה", b:"נדב לוגסי"}],
                 carmel: [
                     { t: "22:00-06:00", c: "רם פז", s: ["דוד אגילבו", "נדב לוגסי", "מיכאל אטלי"] },
                     { t: "06:00-14:00", c: "רם פז", s: ["אלון", "אווקה", "שי משה"] }
@@ -352,7 +352,7 @@
                                     </div>
                                     <div className="col-span-12 lg:col-span-3 mt-12">
                                         <div className="flex justify-between items-end mb-4 px-2"><h3 className="text-3xl font-black underline italic">מגן השומרון</h3><span className="text-sm font-black text-orange-600 bg-orange-50 px-3 py-1 rounded-full border border-orange-200 shadow-sm">חילוף 14:00</span></div>
-                                        <table className="mil-table"><thead className="bg-magen-h"><tr><th colSpan="2" className="py-4">צוות כוננות</th></tr></thead><tbody className="text-xl">{(currentDay.magen||[]).map((m,i)=><tr key={i}><td className="border-l-4 border-slate-900">{m[1]}</td><td>{m[0]}</td></tr>)}</tbody></table>
+                                        <table className="mil-table"><thead className="bg-magen-h"><tr><th colSpan="2" className="py-4">צוות כוננות</th></tr></thead><tbody className="text-xl">{(currentDay.magen||[]).map((m,i)=><tr key={i}><td className="border-l-4 border-slate-900">{m.b}</td><td>{m.a}</td></tr>)}</tbody></table>
                                     </div>
                                     <div className="col-span-12 lg:col-span-5 mt-12">
                                         <h3 className="text-4xl font-black text-center mb-4 italic underline bg-yellow-500 text-black py-3 rounded-t-3xl border-x-4 border-t-4 border-slate-900 uppercase">משימת כרמל</h3>
