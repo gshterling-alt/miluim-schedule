@@ -158,12 +158,30 @@ const App = () => {
             setFbReady(true);
             pill('#6366f1', '⏳ טוען נתונים...');
             _onSnapshot(_doc(_db, 'pluga', 'schedule'), snap => {
-                if (snap.exists()) { setScheduleData(snap.data().v); pill('#10b981', '✅ מסונכרן'); }
-                else { cloudSave('pluga', 'schedule', { v: INIT_SCHEDULE }); }
+                try {
+                    if (snap.exists()) {
+                        const data = snap.data().v;
+                        if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                            setScheduleData(data);
+                            pill('#10b981', '✅ מסונכרן');
+                        } else {
+                            cloudSave('pluga', 'schedule', { v: INIT_SCHEDULE });
+                        }
+                    } else {
+                        cloudSave('pluga', 'schedule', { v: INIT_SCHEDULE });
+                    }
+                } catch(e) {
+                    console.error('schedule error', e);
+                }
                 firstLoad.current = false;
             });
             _onSnapshot(_doc(_db, 'pluga', 'memory'), snap => {
-                if (snap.exists()) setMemory(snap.data().v);
+                try {
+                    if (snap.exists()) {
+                        const data = snap.data().v;
+                        if (data && typeof data === 'object') setMemory(data);
+                    }
+                } catch(e) { console.error('memory error', e); }
             });
         }
         if (window.__fbReady) init();
