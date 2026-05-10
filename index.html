@@ -150,7 +150,7 @@ function App() {
     const setDocRef= useRef(null);
 
     // דגל: האם אנחנו כרגע טוענים מ-Firebase (לא לשמור בחזרה)
-    const loading  = useRef(true);
+    const loading  = useRef(false);
     const fbOk     = useRef(false);
 
     /* ── שמירה ל-Firebase ── */
@@ -172,10 +172,14 @@ function App() {
 
         (async () => {
             try {
-                const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js");
-                const { getFirestore, doc, setDoc, onSnapshot } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+                const fbAppModule  = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js");
+                const fbStoreModule = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+                const { initializeApp, getApps } = fbAppModule;
+                const { getFirestore, doc, setDoc, onSnapshot } = fbStoreModule;
 
-                const app = getApps().length ? getApps()[0] : initializeApp(FB_CONFIG, 'mil');
+                // השתמש באפליקציה קיימת אם כבר אותחלה - מונע שגיאת כפילות
+                const existing = getApps().find(a => a.name === 'miluim');
+                const app = existing || initializeApp(FB_CONFIG, 'miluim');
                 const db  = getFirestore(app);
 
                 dbRef.current    = db;
@@ -215,8 +219,8 @@ function App() {
 
             } catch(e) {
                 console.error('Firebase init error', e);
-                pill('#ef4444','⚠️ לא מקוון');
-                loading.current = false;
+                pill('#ef4444','⚠️ בעיית חיבור - רענן דף');
+                loading.current = false; // אפשר שמירה מקומית
             }
         })();
 
@@ -467,9 +471,9 @@ function App() {
                 <div className="max-w-[1450px] mx-auto p-10 bg-white mt-10 rounded-[3rem] shadow-2xl overflow-x-auto text-black border-8 border-slate-100">
                     <h2 className="text-6xl font-black mb-12 border-b-8 border-indigo-500 pb-6 text-indigo-900 italic tracking-tighter text-right">דוח ריכוז שעות (שמירה / מנוחה)</h2>
                     <table className="mil-table w-full">
-                        <thead className="bg-slate-900 text-white font-black">
+                        <thead className="bg-indigo-700 text-white font-black">
                             <tr>
-                                <th className="p-8 sticky right-0 bg-slate-900 z-10 text-right text-2xl border-l-8 border-indigo-500">שם הלוחם</th>
+                                <th className="p-8 sticky right-0 bg-indigo-700 z-10 text-right text-2xl border-l-8 border-yellow-400">שם הלוחם</th>
                                 {sortedDates.map(d=><th key={d} className="p-4 text-base">{d}</th>)}
                                 <th className="bg-emerald-700 p-8 text-2xl text-center">סה"כ שמירה</th>
                                 <th className="bg-blue-700 p-8 text-2xl text-center">סה"כ מנוחה</th>
