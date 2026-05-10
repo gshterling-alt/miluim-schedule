@@ -23,19 +23,39 @@
         .box-label { background-color:#cfe2f3; width:130px; border-left:3px solid #000; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:1.1em; }
         .box-val   { flex-grow:1; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:1.4em; color:#1e40af; }
         @media print { .no-print{display:none!important;} }
-        #sync-pill { position:fixed; bottom:16px; left:16px; padding:6px 16px; border-radius:999px; font-weight:800; font-size:13px; z-index:9999; font-family:'Assistant',sans-serif; color:white; }
+        #sync-pill { position:fixed; bottom:16px; left:16px; padding:6px 16px; border-radius:999px; font-weight:800; font-size:13px; z-index:9999; font-family:'Assistant',sans-serif; color:white; background:#6366f1; }
     </style>
 </head>
 <body>
 <div id="root"></div>
-<div id="sync-pill" style="background:#6366f1">⏳ מתחבר...</div>
+<div id="sync-pill">⏳ מתחבר...</div>
 
 <script type="text/babel">
-const { useState, useMemo, useEffect, useRef, useCallback } = React;
+const { useState, useMemo, useEffect, useRef } = React;
 
-/* ─────────────────────────────
-   STATIC DATA
-───────────────────────────── */
+/* ═══════════════════════════════════════
+   FIREBASE CONFIG
+═══════════════════════════════════════ */
+const FB_CONFIG = {
+    apiKey:"AIzaSyBM4Fxan8bnJPC_2kwpcxuTsTE4iJbKDTo",
+    authDomain:"miluim-schedule.firebaseapp.com",
+    projectId:"miluim-schedule",
+    storageBucket:"miluim-schedule.firebasestorage.app",
+    messagingSenderId:"308536975907",
+    appId:"1:308536975907:web:d6714d2c9a8c8d7c614796"
+};
+
+/* ═══════════════════════════════════════
+   PILL STATUS
+═══════════════════════════════════════ */
+function pill(bg, txt) {
+    const el = document.getElementById('sync-pill');
+    if (el) { el.style.background = bg; el.textContent = txt; }
+}
+
+/* ═══════════════════════════════════════
+   DATA HELPERS
+═══════════════════════════════════════ */
 const SOLDIERS = [
     "נריה בן יורק","אורן קו","יאיר נמט","רון פריינטה","דולב סעד",
     "אפרים זנו","רמין אלייב","אוריאל גוטליב","אוריה דוראני","אביחי סבן",
@@ -45,40 +65,66 @@ const SOLDIERS = [
     "איתן שפר","נועם אמיאל","עידו טייטלבום","דוד אגילבו","כפיר ליאוצי","ניר לחובצקי"
 ];
 
+function sortKeys(obj) {
+    return Object.keys(obj).sort((a,b) => {
+        const [da,ma]=a.split('.').map(Number), [db,mb]=b.split('.').map(Number);
+        return ma!==mb ? ma-mb : da-db;
+    });
+}
+
+function nextDate(keys) {
+    const sorted = [...keys].sort((a,b)=>{
+        const [da,ma]=a.split('.').map(Number),[db,mb]=b.split('.').map(Number);
+        return ma!==mb?ma-mb:da-db;
+    });
+    let [d,m] = sorted[sorted.length-1].split('.').map(Number);
+    const dim=[0,31,28,31,30,31,30,31,31,30,31,30,31];
+    if(++d>dim[m]){d=1;m++;}
+    return String(d).padStart(2,'0')+'.'+String(m).padStart(2,'0');
+}
+
+function trim3(obj) {
+    const keys = sortKeys(obj);
+    if(keys.length<=3) return obj;
+    const out={};
+    keys.slice(-3).forEach(k=>out[k]=obj[k]);
+    return out;
+}
+
 function makeDay(date, off, sc) {
     return {
-        title: date,
-        patrol: [
-            { t:"22:00-06:00", c:"נריה בן יורק",  s:["רועי בנסימון","עידן אליו"] },
-            { t:"06:00-14:00", c:"אוריה דוראני",   s:["אלכס מאסקיבקר","נתנאל עמר"] },
-            { t:"14:00-22:00", c:"דרור מאיר",      s:["דוד טאג האוקיפ","דוד מיכ קצין"] }
+        title:date,
+        patrol:[
+            {t:"22:00-06:00",c:"נריה בן יורק", s:["רועי בנסימון","עידן אליו"]},
+            {t:"06:00-14:00",c:"אוריה דוראני",  s:["אלכס מאסקיבקר","נתנאל עמר"]},
+            {t:"14:00-22:00",c:"דרור מאיר",     s:["דוד טאג האוקיפ","דוד מיכ קצין"]}
         ],
-        defense: [
-            { t:"22:00-02:00", sg:"ניר לחובצקי",  b:"דולב סעד",  e:"קרלוס",      d:"יהונדב",        h:true },
-            { t:"02:00-06:00", sg:"קול שטרן",     b:"דולב סעד",  e:"דניאל",      d:"אלון",          h:true },
-            { t:"06:00-10:00", sg:"שי משה צברי",  b:"אפרים זנו", e:"רון פריינטה",d:"רמין אלייב",    h:false },
-            { t:"10:00-14:00", sg:"זיו פינטו",    b:"אביחי סבן", e:"מיכאל אטלי", d:"יפתח זילברבוים",h:false }
+        defense:[
+            {t:"22:00-02:00",sg:"ניר לחובצקי", b:"דולב סעד", e:"קרלוס",      d:"יהונדב",        h:true},
+            {t:"02:00-06:00",sg:"קול שטרן",    b:"דולב סעד", e:"דניאל",      d:"אלון",          h:true},
+            {t:"06:00-10:00",sg:"שי משה צברי", b:"אפרים זנו",e:"רון פריינטה",d:"רמין אלייב",    h:false},
+            {t:"10:00-14:00",sg:"זיו פינטו",   b:"אביחי סבן",e:"מיכאל אטלי", d:"יפתח זילברבוים",h:false}
         ],
-        magen: [
-            { a:"איתמר צורף",      b:"עידו טייטלבום" },
-            { a:"מיכאל אופנהיימר", b:"כפיר ליאוצי" }
+        magen:[
+            {a:"איתמר צורף",      b:"עידו טייטלבום"},
+            {a:"מיכאל אופנהיימר", b:"כפיר ליאוצי"}
         ],
-        carmel: [
-            { t:"22:00-06:00", c:"רם פז", s:["דוד אגילבו","נדב לוגסי","מיכאל אטלי"] },
-            { t:"06:00-14:00", c:"רם פז", s:["אלון","אווקה","שי משה"] }
+        carmel:[
+            {t:"22:00-06:00",c:"רם פז",s:["דוד אגילבו","נדב לוגסי","מיכאל אטלי"]},
+            {t:"06:00-14:00",c:"רם פז",s:["אלון","אווקה","שי משה"]}
         ],
-        officer: off, scout: sc,
-        bottomNote: "נא להקפיד על דריכות מלאה וערכות פריצה"
+        officer:off, scout:sc,
+        bottomNote:"נא להקפיד על דריכות מלאה וערכות פריצה"
     };
 }
 
-const DEFAULT_SCHEDULE = {
-    '01.05': makeDay("01.05","אוריה דוראני","נועם אמיאל"),
-    '02.05': makeDay("02.05","דרור מאיר","אפרים זנו"),
-    '03.05': makeDay("03.05","אורן קו","זיו פינטו")
+const DEFAULT_SCHED = {
+    '01.05':makeDay("01.05","אוריה דוראני","נועם אמיאל"),
+    '02.05':makeDay("02.05","דרור מאיר","אפרים זנו"),
+    '03.05':makeDay("03.05","אורן קו","זיו פינטו")
 };
 
-const DEFAULT_MEMORY = {
+const DEFAULT_MEM = {
     rules:[
         "סבב מפקדים קבוע: נריה, אורן, יאיר",
         "מנוחה של 24 שעות לאחר קצין מוצב",
@@ -87,229 +133,208 @@ const DEFAULT_MEMORY = {
     personnel:{}
 };
 
-/* ─────────────────────────────
-   HELPERS
-───────────────────────────── */
-function setPill(bg, txt) {
-    const el = document.getElementById('sync-pill');
-    if (el) { el.style.background = bg; el.textContent = txt; }
-}
-
-function sortKeys(obj) {
-    return Object.keys(obj).sort((a,b) => {
-        const [da,ma] = a.split('.').map(Number);
-        const [db,mb] = b.split('.').map(Number);
-        return ma!==mb ? ma-mb : da-db;
-    });
-}
-
-function nextDate(obj) {
-    const keys = sortKeys(obj);
-    const last = keys[keys.length-1];
-    let [d,m] = last.split('.').map(Number);
-    const dim = [0,31,28,31,30,31,30,31,31,30,31,30,31];
-    if (++d > dim[m]) { d=1; m++; }
-    return String(d).padStart(2,'0')+'.'+String(m).padStart(2,'0');
-}
-
-function trim3(obj) {
-    const keys = sortKeys(obj);
-    if (keys.length <= 3) return obj;
-    const out = {};
-    keys.slice(-3).forEach(k => out[k]=obj[k]);
-    return out;
-}
-
-function isValidSchedule(v) {
-    return v && typeof v === 'object' && Object.keys(v).length > 0;
-}
-
-/* ─────────────────────────────
-   FIREBASE (lazy load)
-───────────────────────────── */
-let _fb = null;
-
-async function fbSave(col, id, data) {
-    if (!_fb) return;
-    setPill('#f59e0b','💾 שומר...');
-    try {
-        await _fb.setDoc(_fb.doc(_fb.db, col, id), data);
-        setPill('#10b981','✅ מסונכרן');
-    } catch(e) {
-        setPill('#ef4444','❌ שגיאת שמירה');
-        console.error('fbSave', e);
-    }
-}
-
-/* ─────────────────────────────
+/* ═══════════════════════════════════════
    APP
-───────────────────────────── */
+═══════════════════════════════════════ */
 function App() {
-    const [view,     setView]     = useState('schedule');
-    const [activeDay,setActiveDay]= useState('03.05');
-    const [sched,    setSched]    = useState(DEFAULT_SCHEDULE);
-    const [mem,      setMem]      = useState(DEFAULT_MEMORY);
-    const [aiText,   setAiText]   = useState('');
-    const [aiMsg,    setAiMsg]    = useState(null);
+    const [view,      setView]      = useState('schedule');
+    const [activeDay, setActiveDay] = useState('03.05');
+    const [sched,     setSched]     = useState(DEFAULT_SCHED);
+    const [mem,       setMem]       = useState(DEFAULT_MEM);
+    const [aiText,    setAiText]    = useState('');
+    const [aiMsg,     setAiMsg]     = useState(null);
 
-    const fbReady  = useRef(false);
-    const saving   = useRef(false);
+    // Firebase refs — לא state כדי שלא יגרמו re-render
+    const dbRef    = useRef(null);
+    const docRef   = useRef(null);
+    const setDocRef= useRef(null);
 
-    /* ── Firebase init ── */
+    // דגל: האם אנחנו כרגע טוענים מ-Firebase (לא לשמור בחזרה)
+    const loading  = useRef(true);
+    const fbOk     = useRef(false);
+
+    /* ── שמירה ל-Firebase ── */
+    async function save(col, id, data) {
+        if(!fbOk.current || !dbRef.current) return;
+        pill('#f59e0b','💾 שומר...');
+        try {
+            await setDocRef.current(docRef.current(dbRef.current, col, id), data);
+            pill('#10b981','✅ מסונכרן');
+        } catch(e) {
+            pill('#ef4444','❌ שגיאת שמירה');
+            console.error(e);
+        }
+    }
+
+    /* ── אתחול Firebase ── */
     useEffect(() => {
-        let unsub1, unsub2;
+        let unsubSched, unsubMem;
 
-        async function init() {
+        (async () => {
             try {
-                const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js");
+                const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js");
                 const { getFirestore, doc, setDoc, onSnapshot } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
 
-                const app = initializeApp({
-                    apiKey:"AIzaSyBM4Fxan8bnJPC_2kwpcxuTsTE4iJbKDTo",
-                    authDomain:"miluim-schedule.firebaseapp.com",
-                    projectId:"miluim-schedule",
-                    storageBucket:"miluim-schedule.firebasestorage.app",
-                    messagingSenderId:"308536975907",
-                    appId:"1:308536975907:web:d6714d2c9a8c8d7c614796"
-                }, 'miluim-app');
+                const app = getApps().length ? getApps()[0] : initializeApp(FB_CONFIG, 'mil');
+                const db  = getFirestore(app);
 
-                const db = getFirestore(app);
-                _fb = { db, doc, setDoc };
-                fbReady.current = true;
-                setPill('#6366f1','⏳ טוען נתונים...');
+                dbRef.current    = db;
+                docRef.current   = doc;
+                setDocRef.current= setDoc;
+                fbOk.current     = true;
+                pill('#6366f1','⏳ טוען...');
 
-                /* schedule listener */
-                unsub1 = onSnapshot(doc(db,'pluga','schedule'), snap => {
-                    try {
-                        if (!snap.exists()) {
-                            fbSave('pluga','schedule',{ v: DEFAULT_SCHEDULE });
+                /* ── האזנה לשינויים בלוז ── */
+                unsubSched = onSnapshot(doc(db,'pluga','schedule'), snap => {
+                    if(snap.exists()) {
+                        const v = snap.data()?.v;
+                        if(v && typeof v==='object' && Object.keys(v).length>0) {
+                            loading.current = true;          // נמנע מ-save loop
+                            setSched(v);
+                            pill('#10b981','✅ מסונכרן');
+                            setTimeout(()=>{ loading.current=false; }, 500);
                             return;
                         }
-                        const v = snap.data()?.v;
-                        if (isValidSchedule(v)) {
-                            setSched(v);
-                            setPill('#10b981','✅ מסונכרן');
-                        }
-                    } catch(e) { console.error('sched snap', e); }
-                }, e => { console.error('sched listener', e); });
+                    }
+                    // אין נתונים — שמור ברירת מחדל
+                    loading.current = false;
+                    save('pluga','schedule',{v:DEFAULT_SCHED});
+                }, err => console.error('sched listener',err));
 
-                /* memory listener */
-                unsub2 = onSnapshot(doc(db,'pluga','memory'), snap => {
-                    try {
-                        if (snap.exists()) {
-                            const v = snap.data()?.v;
-                            if (v && typeof v === 'object') setMem(v);
+                /* ── האזנה לשינויים בזיכרון ── */
+                unsubMem = onSnapshot(doc(db,'pluga','memory'), snap => {
+                    if(snap.exists()) {
+                        const v = snap.data()?.v;
+                        if(v && typeof v==='object') {
+                            loading.current = true;
+                            setMem(v);
+                            setTimeout(()=>{ loading.current=false; }, 500);
                         }
-                    } catch(e) { console.error('mem snap', e); }
-                }, e => { console.error('mem listener', e); });
+                    }
+                }, err => console.error('mem listener',err));
 
             } catch(e) {
-                console.error('Firebase init failed', e);
-                setPill('#ef4444','⚠️ מצב לא מקוון');
+                console.error('Firebase init error', e);
+                pill('#ef4444','⚠️ לא מקוון');
+                loading.current = false;
             }
-        }
+        })();
 
-        init();
-        return () => { unsub1?.(); unsub2?.(); };
+        return () => { unsubSched?.(); unsubMem?.(); };
     }, []);
 
-    /* ── auto-save schedule ── */
-    const schedRef = useRef(sched);
-    schedRef.current = sched;
+    /* ── שמירה אוטומטית כשמשתנה הלוז ── */
     useEffect(() => {
-        if (!fbReady.current) return;
-        const t = setTimeout(() => fbSave('pluga','schedule',{ v: schedRef.current }), 1000);
+        if(loading.current || !fbOk.current) return;
+        const t = setTimeout(() => save('pluga','schedule',{v:sched}), 800);
         return () => clearTimeout(t);
     }, [sched]);
 
-    /* ── auto-save memory ── */
+    /* ── שמירה אוטומטית כשמשתנה הזיכרון ── */
     useEffect(() => {
-        if (!fbReady.current) return;
-        fbSave('pluga','memory',{ v: mem });
+        if(loading.current || !fbOk.current) return;
+        const t = setTimeout(() => save('pluga','memory',{v:mem}), 800);
+        return () => clearTimeout(t);
     }, [mem]);
 
-    /* ── computed ── */
-    const sortedDates  = useMemo(() => sortKeys(sched), [sched]);
-    const visibleDates = useMemo(() => sortedDates.slice(-3), [sortedDates]);
+    /* ── חישובים ── */
+    const sortedDates  = useMemo(()=>sortKeys(sched),[sched]);
+    const visibleDates = useMemo(()=>sortedDates.slice(-3),[sortedDates]);
 
-    useEffect(() => {
-        if (visibleDates.length && !visibleDates.includes(activeDay))
+    useEffect(()=>{
+        if(visibleDates.length && !visibleDates.includes(activeDay))
             setActiveDay(visibleDates[visibleDates.length-1]);
-    }, [visibleDates]);
+    },[visibleDates]);
 
-    const report = useMemo(() => {
-        const r = {};
-        SOLDIERS.forEach(n => { r[n]={days:{},total:0}; sortedDates.forEach(d=>r[n].days[d]=0); });
-        Object.entries(sched).forEach(([date,day]) => {
-            (day.patrol||[]).forEach(p => {
-                if(r[p.c]) r[p.c].days[date]+=8;
+    const report = useMemo(()=>{
+        const r={};
+        SOLDIERS.forEach(n=>{r[n]={days:{},total:0};sortedDates.forEach(d=>r[n].days[d]=0);});
+        Object.entries(sched).forEach(([date,day])=>{
+            (day.patrol||[]).forEach(p=>{
+                if(r[p.c])r[p.c].days[date]+=8;
                 (p.s||[]).forEach(s=>{if(r[s])r[s].days[date]+=8;});
             });
             (day.defense||[]).forEach(d=>[d.sg,d.b,d.e,d.d].forEach(n=>{if(r[n])r[n].days[date]+=4;}));
         });
         SOLDIERS.forEach(n=>r[n].total=Object.values(r[n].days).reduce((a,b)=>a+b,0));
         return r;
-    }, [sched, sortedDates]);
+    },[sched,sortedDates]);
 
-    /* ── AI ── */
+    /* ── פונקציית AI ── */
     function runAI() {
         const cmd = aiText.trim().toLowerCase();
-        let ns = {...sched};
-        let nm = {...mem};
+        let ns = JSON.parse(JSON.stringify(sched)); // deep copy
+        let nm = JSON.parse(JSON.stringify(mem));
         let msg = "הפקודה בוצעה.";
 
-        if (cmd.includes("הוסף יום") || cmd.includes("יום חדש") || cmd.includes("תאריך חדש")) {
+        /* הוספת יום */
+        if(cmd.includes("הוסף יום")||cmd.includes("יום חדש")||cmd.includes("תאריך חדש")) {
             const m = cmd.match(/\d{2}\.\d{2}/);
-            const nd = m ? m[0] : nextDate(ns);
+            const nd = m ? m[0] : nextDate(Object.keys(ns));
             ns[nd] = makeDay(nd,"ממתין","ממתין");
             ns = trim3(ns);
             setActiveDay(nd);
             msg = `יום ${nd} נוסף. מוצגים 3 הימים האחרונים.`;
         }
-        else if (cmd.includes("החלף") || cmd.includes("תחליף")) {
+        /* החלפה */
+        else if(cmd.includes("החלף")||cmd.includes("תחליף")) {
             const found = SOLDIERS.filter(s=>cmd.includes(s.toLowerCase()));
-            if (found.length>=2) {
+            if(found.length>=2) {
                 const [s1,s2]=found;
-                const day={...ns[activeDay]};
-                const sw=arr=>arr.map(x=>{
-                    const y={...x};
-                    ['c','sg','b','e','d'].forEach(k=>{if(y[k]===s1)y[k]=s2;else if(y[k]===s2)y[k]=s1;});
-                    if(y.s)y.s=y.s.map(n=>n===s1?s2:n===s2?s1:n);
-                    return y;
+                const day = JSON.parse(JSON.stringify(ns[activeDay]||{}));
+                const sw = arr => arr.map(x=>{
+                    ['c','sg','b','e','d'].forEach(k=>{
+                        if(x[k]===s1)x[k]=s2; else if(x[k]===s2)x[k]=s1;
+                    });
+                    if(x.s) x.s=x.s.map(n=>n===s1?s2:n===s2?s1:n);
+                    return x;
                 });
                 day.patrol =sw(day.patrol||[]);
                 day.defense=sw(day.defense||[]);
                 day.carmel =sw(day.carmel||[]);
-                if(day.officer===s1)day.officer=s2;else if(day.officer===s2)day.officer=s1;
-                if(day.scout===s1)day.scout=s2;else if(day.scout===s2)day.scout=s1;
+                if(day.officer===s1)day.officer=s2; else if(day.officer===s2)day.officer=s1;
+                if(day.scout===s1)day.scout=s2;     else if(day.scout===s2)day.scout=s1;
                 ns[activeDay]=day;
                 msg=`החלפתי בין ${s1} ל-${s2} ביום ${activeDay}.`;
+            } else {
+                msg="לא מצאתי 2 שמות בפקודה. נסה: החלף את [שם] ב-[שם]";
             }
         }
-        else if (cmd.includes("מי") || cmd.includes("פנוי") || cmd.includes("חלופה")) {
+        /* מי פנוי */
+        else if(cmd.includes("מי")||cmd.includes("פנוי")||cmd.includes("חלופה")) {
             const day=ns[activeDay]||{};
             const busy=new Set();
             [...(day.patrol||[]),...(day.defense||[]),...(day.carmel||[])].forEach(x=>{
                 [x.c,x.sg,x.b,x.e,x.d].forEach(n=>n&&busy.add(n));
                 (x.s||[]).forEach(n=>busy.add(n));
             });
-            msg=`פנויים ב-${activeDay}: ${SOLDIERS.filter(s=>!busy.has(s)).slice(0,5).join(", ")}`;
+            const avail=SOLDIERS.filter(s=>!busy.has(s)).slice(0,5);
+            msg=`פנויים ב-${activeDay}: ${avail.join(", ")||"אין"}`;
         }
-        else if (cmd.includes("בבית") || cmd.includes("יצא")) {
+        /* בבית */
+        else if(cmd.includes("בבית")||cmd.includes("יצא")) {
             const name=SOLDIERS.find(s=>cmd.includes(s.toLowerCase()));
-            if(name){nm={...nm,personnel:{...nm.personnel,[name]:"בבית"}};msg=`${name} עודכן לבבית.`;}
+            if(name){nm.personnel[name]="בבית";msg=`${name} עודכן לבבית.`;}
+            else msg="לא מצאתי שם. נסה: [שם מלא] בבית";
         }
-        else if (cmd.includes("חזר") || cmd.includes("בבסיס")) {
+        /* חזר */
+        else if(cmd.includes("חזר")||cmd.includes("בבסיס")) {
             const name=SOLDIERS.find(s=>cmd.includes(s.toLowerCase()));
-            if(name){nm={...nm,personnel:{...nm.personnel,[name]:"בבסיס"}};msg=`${name} עודכן לבבסיס.`;}
+            if(name){nm.personnel[name]="בבסיס";msg=`${name} עודכן לבבסיס.`;}
+        }
+        else {
+            msg="פקודות: הוסף יום | החלף את X ב-Y | מי פנוי? | X בבית | X חזר";
         }
 
-        setSched(ns); setMem(nm);
-        setAiMsg(msg); setAiText('');
+        loading.current = false; // ודא שמירה
+        setSched(ns);
+        setMem(nm);
+        setAiMsg(msg);
+        setAiText('');
         setTimeout(()=>setAiMsg(null),8000);
     }
 
-    const onKey = e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();runAI();} };
+    const onKey = e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();runAI();} };
 
     function exportWA() {
         html2canvas(document.getElementById('capture-area'),{scale:2}).then(c=>{
@@ -322,7 +347,9 @@ function App() {
 
     const cur = sched[activeDay] || sched[visibleDates[visibleDates.length-1]] || {};
 
-    /* ══ RENDER ══ */
+    /* ══════════════════════════════════════
+       RENDER
+    ══════════════════════════════════════ */
     return (
         <div className="min-h-screen pb-24">
 
@@ -345,7 +372,11 @@ function App() {
                         <textarea value={aiText} onChange={e=>setAiText(e.target.value)} onKeyDown={onKey}
                             placeholder="פקודה: הוסף יום | החלף את X ב-Y | מי פנוי? | X בבית | X חזר"
                             className="w-full bg-slate-800 p-4 rounded-2xl text-white font-bold h-16 resize-none border-none focus:ring-4 focus:ring-indigo-500/50" />
-                        {aiMsg && <div className="absolute top-[-55px] right-0 bg-indigo-500 text-white px-6 py-2 rounded-2xl text-sm font-black shadow-2xl border-2 border-white animate-bounce">{aiMsg}</div>}
+                        {aiMsg && (
+                            <div className="absolute top-[-55px] right-0 bg-indigo-500 text-white px-6 py-2 rounded-2xl text-sm font-black shadow-2xl border-2 border-white animate-bounce">
+                                {aiMsg}
+                            </div>
+                        )}
                     </div>
                     <button onClick={runAI} className="bg-white text-slate-900 px-12 rounded-2xl font-black hover:bg-indigo-400 hover:text-white transition h-16 shadow-xl">עדכון חכם</button>
                 </div>
@@ -355,11 +386,12 @@ function App() {
             {view==='schedule' && (
                 <div className="max-w-[1400px] mx-auto p-4 md:p-10 text-right">
                     <div className="mb-10 flex flex-wrap justify-between items-center no-print gap-4">
-                        <div className="flex gap-2 items-center">
+                        <div className="flex gap-2 items-center flex-wrap">
                             <span className="text-slate-400 font-bold ml-2 text-xs uppercase italic">3 ימים עדכניים:</span>
                             {visibleDates.map(d=>(
                                 <button key={d} onClick={()=>setActiveDay(d)}
-                                    className={`px-8 py-3 rounded-2xl font-black text-sm border-2 transition ${activeDay===d?'bg-indigo-600 text-white border-indigo-600 shadow-xl -translate-y-0.5':'bg-white text-slate-500 hover:border-indigo-300'}`}>{d}</button>
+                                    className={`px-8 py-3 rounded-2xl font-black text-sm border-2 transition
+                                        ${activeDay===d?'bg-indigo-600 text-white border-indigo-600 shadow-xl -translate-y-0.5':'bg-white text-slate-500 hover:border-indigo-300'}`}>{d}</button>
                             ))}
                         </div>
                         <button onClick={exportWA} className="bg-emerald-500 text-white px-12 py-4 rounded-3xl font-black shadow-2xl hover:bg-emerald-600 transition">הורדה ושיתוף לווצאפ</button>
@@ -368,29 +400,38 @@ function App() {
                     <div id="capture-area" className="bg-white p-12 md:p-20 shadow-2xl border-[15px] border-slate-100 rounded-[4rem] text-black relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-40 h-40 bg-slate-50 rounded-bl-full opacity-50"></div>
                         <h1 className="text-8xl font-black text-center mb-20 tracking-tighter italic border-b-[10px] border-slate-900 pb-12 uppercase">שבצ"ק פלוגה ב' - {activeDay}</h1>
+
                         <div className="grid grid-cols-12 gap-16 text-right" dir="rtl">
 
+                            {/* סיור */}
                             <div className="col-span-12 lg:col-span-5">
                                 <h3 className="text-4xl font-black text-center mb-4 italic underline bg-emerald-600 text-white py-3 rounded-t-3xl border-x-4 border-t-4 border-slate-900 uppercase">משימת סיור</h3>
                                 <table className="mil-table">
                                     <thead className="bg-green-h"><tr><th>זמן</th><th>מפקד</th><th colSpan="2">צוות לוחמים</th></tr></thead>
-                                    <tbody>{(cur.patrol||[]).map((r,i)=><tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td className="text-indigo-800 text-xl font-black">{r.c}</td><td>{(r.s||[])[0]}</td><td>{(r.s||[])[1]}</td></tr>)}</tbody>
+                                    <tbody>{(cur.patrol||[]).map((r,i)=>(
+                                        <tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td className="text-indigo-800 text-xl font-black">{r.c}</td><td>{(r.s||[])[0]}</td><td>{(r.s||[])[1]}</td></tr>
+                                    ))}</tbody>
                                 </table>
                             </div>
 
+                            {/* הגנה */}
                             <div className="col-span-12 lg:col-span-7">
                                 <h3 className="text-4xl font-black text-center mb-4 italic underline bg-orange-600 text-white py-3 rounded-t-3xl border-x-4 border-t-4 border-slate-900 uppercase">הגנת מחנה</h3>
                                 <table className="mil-table">
                                     <thead className="bg-orange-h"><tr><th>זמן</th><th>ש.ג.</th><th>בונקר</th><th>מזרחית</th><th>דרומית</th></tr></thead>
-                                    <tbody>{(cur.defense||[]).map((r,i)=><tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td>{r.sg}</td><td className={r.h?'highlight-y':''}>{r.b}</td><td>{r.e}</td><td>{r.d}</td></tr>)}</tbody>
+                                    <tbody>{(cur.defense||[]).map((r,i)=>(
+                                        <tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td>{r.sg}</td><td className={r.h?'highlight-y':''}>{r.b}</td><td>{r.e}</td><td>{r.d}</td></tr>
+                                    ))}</tbody>
                                 </table>
                             </div>
 
+                            {/* קצין + גשש */}
                             <div className="col-span-12 lg:col-span-4 mt-12 flex flex-col gap-6">
                                 <div className="box-cmd"><div className="box-label">קצין מוצב</div><div className="box-val">{cur.officer}</div></div>
                                 <div className="box-cmd opacity-80"><div className="box-label bg-slate-300">כונן גשש</div><div className="box-val">{cur.scout}</div></div>
                             </div>
 
+                            {/* מגן השומרון */}
                             <div className="col-span-12 lg:col-span-3 mt-12">
                                 <div className="flex justify-between items-end mb-4 px-2">
                                     <h3 className="text-3xl font-black underline italic">מגן השומרון</h3>
@@ -398,18 +439,24 @@ function App() {
                                 </div>
                                 <table className="mil-table">
                                     <thead className="bg-magen-h"><tr><th colSpan="2" className="py-4">צוות כוננות</th></tr></thead>
-                                    <tbody className="text-xl">{(cur.magen||[]).map((m,i)=><tr key={i}><td className="border-l-4 border-slate-900">{m.b}</td><td>{m.a}</td></tr>)}</tbody>
+                                    <tbody className="text-xl">{(cur.magen||[]).map((m,i)=>(
+                                        <tr key={i}><td className="border-l-4 border-slate-900">{m.b}</td><td>{m.a}</td></tr>
+                                    ))}</tbody>
                                 </table>
                             </div>
 
+                            {/* כרמל */}
                             <div className="col-span-12 lg:col-span-5 mt-12">
                                 <h3 className="text-4xl font-black text-center mb-4 italic underline bg-yellow-500 text-black py-3 rounded-t-3xl border-x-4 border-t-4 border-slate-900 uppercase">משימת כרמל</h3>
                                 <table className="mil-table">
                                     <thead className="bg-yellow-h"><tr><th>זמן</th><th>מפקד</th><th colSpan="3">לוחמים</th></tr></thead>
-                                    <tbody>{(cur.carmel||[]).map((r,i)=><tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td className="text-indigo-800 text-xl font-black">{r.c}</td><td>{(r.s||[])[0]}</td><td>{(r.s||[])[1]}</td><td>{(r.s||[])[2]}</td></tr>)}</tbody>
+                                    <tbody>{(cur.carmel||[]).map((r,i)=>(
+                                        <tr key={i}><td className="bg-slate-50 font-mono text-lg">{r.t}</td><td className="text-indigo-800 text-xl font-black">{r.c}</td><td>{(r.s||[])[0]}</td><td>{(r.s||[])[1]}</td><td>{(r.s||[])[2]}</td></tr>
+                                    ))}</tbody>
                                 </table>
                             </div>
                         </div>
+
                         <div className="mt-32 text-center font-black text-4xl italic text-slate-400 border-t-8 border-slate-100 pt-16">"{cur.bottomNote}"</div>
                     </div>
                 </div>
