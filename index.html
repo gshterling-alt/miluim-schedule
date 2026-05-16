@@ -9,47 +9,13 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-
-    <!-- Firebase נטען כ-module לפני Babel — פותר את בעיית require -->
-    <script type="module">
-        import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-        const FB_CONFIG = {
-            apiKey:"AIzaSyBM4Fxan8bnJPC_2kwpcxuTsTE4iJbKDTo",
-            authDomain:"miluim-schedule.firebaseapp.com",
-            projectId:"miluim-schedule",
-            storageBucket:"miluim-schedule.firebasestorage.app",
-            messagingSenderId:"308536975907",
-            appId:"1:308536975907:web:d6714d2c9a8c8d7c614796"
-        };
-
-        try {
-            const apps = getApps();
-            const app = apps.find(a => a.name === 'mil') || initializeApp(FB_CONFIG, 'mil');
-            const db  = getFirestore(app);
-
-            /* חשוף ל-window כדי ש-Babel יוכל להשתמש */
-            window.__fb = { db, doc, setDoc, onSnapshot };
-            window.__fbReady = true;
-            window.dispatchEvent(new Event('fbReady'));
-            console.log('Firebase ready ✅');
-        } catch(e) {
-            console.error('Firebase init failed:', e);
-            window.__fbReady = false;
-            window.dispatchEvent(new Event('fbReady'));
-        }
-    </script>
-
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap');
         body{font-family:'Assistant',sans-serif;background:#f1f5f9;margin:0;text-align:right;}
         .mil-table{border:3px solid #000!important;border-collapse:collapse;width:100%;text-align:center;background:white;}
         .mil-table th,.mil-table td{border:2px solid #000!important;padding:8px;font-weight:700;font-size:14px;color:#000;height:45px;}
-        .bg-green-h{background-color:#d9ead3!important;}
-        .bg-orange-h{background-color:#fce5cd!important;}
-        .bg-yellow-h{background-color:#fff2cc!important;}
-        .bg-magen-h{background-color:#e69138!important;color:white!important;}
+        .bg-green-h{background-color:#d9ead3!important;}.bg-orange-h{background-color:#fce5cd!important;}
+        .bg-yellow-h{background-color:#fff2cc!important;}.bg-magen-h{background-color:#e69138!important;color:white!important;}
         .highlight-y{background-color:#ffff00!important;}
         .box-cmd{border:3px solid #000;display:flex;width:320px;height:60px;margin-bottom:15px;background:white;}
         .box-label{background-color:#cfe2f3;width:130px;border-left:3px solid #000;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1em;}
@@ -61,17 +27,46 @@
 <body>
 <div id="root"></div>
 <div id="sync-pill">⏳ מתחבר...</div>
-
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
 
-/* ═══════════ PILL ═══════════ */
-function pill(bg,txt){
-    const el=document.getElementById('sync-pill');
-    if(el){el.style.background=bg;el.textContent=txt;}
+/* ═══════════════════════════════════════
+   FIRESTORE REST API — ללא SDK
+   שומר JSON כ-string בתוך Firestore
+═══════════════════════════════════════ */
+const PROJECT = "miluim-schedule";
+const API_KEY = "AIzaSyBM4Fxan8bnJPC_2kwpcxuTsTE4iJbKDTo";
+const BASE    = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents/pluga`;
+
+async function fsRead(docId) {
+    try {
+        const res = await fetch(`${BASE}/${docId}?key=${API_KEY}`);
+        if (!res.ok) return null;
+        const json = await res.json();
+        const str = json?.fields?.json?.stringValue;
+        return str ? JSON.parse(str) : null;
+    } catch(e) { console.error('fsRead', e); return null; }
 }
 
-/* ═══════════ DATA ═══════════ */
+async function fsWrite(docId, data) {
+    try {
+        const body = { fields: { json: { stringValue: JSON.stringify(data) } } };
+        const res = await fetch(
+            `${BASE}/${docId}?key=${API_KEY}&updateMask.fieldPaths=json`,
+            { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }
+        );
+        return res.ok;
+    } catch(e) { console.error('fsWrite', e); return false; }
+}
+
+/* ═══════════════════════════════════════
+   PILL
+═══════════════════════════════════════ */
+function pill(bg,txt){const el=document.getElementById('sync-pill');if(el){el.style.background=bg;el.textContent=txt;}}
+
+/* ═══════════════════════════════════════
+   DATA
+═══════════════════════════════════════ */
 const SOLDIERS=[
     "נריה בן יורק","אורן קו","יאיר נמט","רון פריינטה","דולב סעד",
     "אפרים זנו","רמין אלייב","אוריאל גוטליב","אוריה דוראני","אביחי סבן",
@@ -81,50 +76,24 @@ const SOLDIERS=[
     "איתן שפר","נועם אמיאל","עידו טייטלבום","דוד אגילבו","כפיר ליאוצי","ניר לחובצקי"
 ];
 
-function sortKeys(obj){
-    return Object.keys(obj).sort((a,b)=>{
-        const[da,ma]=a.split('.').map(Number),[db,mb]=b.split('.').map(Number);
-        return ma!==mb?ma-mb:da-db;
-    });
-}
-function nextDate(keys){
-    const s=[...keys].sort((a,b)=>{const[da,ma]=a.split('.').map(Number),[db,mb]=b.split('.').map(Number);return ma!==mb?ma-mb:da-db;});
-    let[d,m]=s[s.length-1].split('.').map(Number);
-    const dim=[0,31,28,31,30,31,30,31,31,30,31,30,31];
-    if(++d>dim[m]){d=1;m++;}
-    return String(d).padStart(2,'0')+'.'+String(m).padStart(2,'0');
-}
-function trim3(obj){
-    const keys=sortKeys(obj);
-    if(keys.length<=3)return obj;
-    const out={};keys.slice(-3).forEach(k=>out[k]=obj[k]);return out;
-}
-function makeDay(date,off,sc){
-    return{title:date,
-        patrol:[
-            {t:"22:00-06:00",c:"נריה בן יורק", s:["רועי בנסימון","עידן אליו"]},
-            {t:"06:00-14:00",c:"אוריה דוראני",  s:["אלכס מאסקיבקר","נתנאל עמר"]},
-            {t:"14:00-22:00",c:"דרור מאיר",     s:["דוד טאג האוקיפ","דוד מיכ קצין"]}
-        ],
-        defense:[
-            {t:"22:00-02:00",sg:"ניר לחובצקי", b:"דולב סעד", e:"קרלוס",      d:"יהונדב",        h:true},
-            {t:"02:00-06:00",sg:"קול שטרן",    b:"דולב סעד", e:"דניאל",      d:"אלון",          h:true},
-            {t:"06:00-10:00",sg:"שי משה צברי", b:"אפרים זנו",e:"רון פריינטה",d:"רמין אלייב",    h:false},
-            {t:"10:00-14:00",sg:"זיו פינטו",   b:"אביחי סבן",e:"מיכאל אטלי", d:"יפתח זילברבוים",h:false}
-        ],
-        magen:[{a:"איתמר צורף",b:"עידו טייטלבום"},{a:"מיכאל אופנהיימר",b:"כפיר ליאוצי"}],
-        carmel:[
-            {t:"22:00-06:00",c:"רם פז",s:["דוד אגילבו","נדב לוגסי","מיכאל אטלי"]},
-            {t:"06:00-14:00",c:"רם פז",s:["אלון","אווקה","שי משה"]}
-        ],
-        officer:off,scout:sc,bottomNote:"נא להקפיד על דריכות מלאה וערכות פריצה"
-    };
-}
+function sortKeys(obj){return Object.keys(obj).sort((a,b)=>{const[da,ma]=a.split('.').map(Number),[db,mb]=b.split('.').map(Number);return ma!==mb?ma-mb:da-db;});}
+function nextDate(keys){const s=[...keys].sort((a,b)=>{const[da,ma]=a.split('.').map(Number),[db,mb]=b.split('.').map(Number);return ma!==mb?ma-mb:da-db;});let[d,m]=s[s.length-1].split('.').map(Number);const dim=[0,31,28,31,30,31,30,31,31,30,31,30,31];if(++d>dim[m]){d=1;m++;}return String(d).padStart(2,'0')+'.'+String(m).padStart(2,'0');}
+function trim3(obj){const keys=sortKeys(obj);if(keys.length<=3)return obj;const out={};keys.slice(-3).forEach(k=>out[k]=obj[k]);return out;}
+
+function makeDay(date,off,sc){return{title:date,
+    patrol:[{t:"22:00-06:00",c:"נריה בן יורק",s:["רועי בנסימון","עידן אליו"]},{t:"06:00-14:00",c:"אוריה דוראני",s:["אלכס מאסקיבקר","נתנאל עמר"]},{t:"14:00-22:00",c:"דרור מאיר",s:["דוד טאג האוקיפ","דוד מיכ קצין"]}],
+    defense:[{t:"22:00-02:00",sg:"ניר לחובצקי",b:"דולב סעד",e:"קרלוס",d:"יהונדב",h:true},{t:"02:00-06:00",sg:"קול שטרן",b:"דולב סעד",e:"דניאל",d:"אלון",h:true},{t:"06:00-10:00",sg:"שי משה צברי",b:"אפרים זנו",e:"רון פריינטה",d:"רמין אלייב",h:false},{t:"10:00-14:00",sg:"זיו פינטו",b:"אביחי סבן",e:"מיכאל אטלי",d:"יפתח זילברבוים",h:false}],
+    magen:[{a:"איתמר צורף",b:"עידו טייטלבום"},{a:"מיכאל אופנהיימר",b:"כפיר ליאוצי"}],
+    carmel:[{t:"22:00-06:00",c:"רם פז",s:["דוד אגילבו","נדב לוגסי","מיכאל אטלי"]},{t:"06:00-14:00",c:"רם פז",s:["אלון","אווקה","שי משה"]}],
+    officer:off,scout:sc,bottomNote:"נא להקפיד על דריכות מלאה וערכות פריצה"
+};}
 
 const DS={'01.05':makeDay("01.05","אוריה דוראני","נועם אמיאל"),'02.05':makeDay("02.05","דרור מאיר","אפרים זנו"),'03.05':makeDay("03.05","אורן קו","זיו פינטו")};
 const DM={rules:["סבב מפקדים קבוע: נריה, אורן, יאיר","מנוחה של 24 שעות לאחר קצין מוצב","חובה להצטייד בערכת פריצה בעלייה לעמדה דרומית"],personnel:{}};
 
-/* ═══════════ APP ═══════════ */
+/* ═══════════════════════════════════════
+   APP
+═══════════════════════════════════════ */
 function App(){
     const[view,setView]=useState('schedule');
     const[activeDay,setActiveDay]=useState('03.05');
@@ -132,104 +101,47 @@ function App(){
     const[mem,setMem]=useState(DM);
     const[aiText,setAiText]=useState('');
     const[aiMsg,setAiMsg]=useState(null);
-    const fromFB=useRef(false);
-    const fbOk=useRef(false);
+    const lastSaved=useRef(0); // timestamp של השמירה האחרונה שלנו
 
-    /* ─── Firebase save ─── */
-    async function fbSave(col,id,data){
-        if(!fbOk.current||!window.__fb)return;
-        pill('#f59e0b','💾 שומר...');
-        try{
-            const{db,doc,setDoc}=window.__fb;
-            await setDoc(doc(db,col,id),data);
-            pill('#10b981','✅ מסונכרן');
-        }catch(e){
-            pill('#ef4444','❌ שגיאת שמירה');
-            console.error('fbSave',e);
-        }
-    }
-
-    /* ─── Firebase init ─── */
+    /* ═══ טעינה ראשונית ═══ */
     useEffect(()=>{
-        let unsubS,unsubM;
-        function startListeners(){
-            if(!window.__fb){
-                pill('#f97316','⚠️ מצב לא מקוון');
-                return;
-            }
-            const{db,doc,onSnapshot}=window.__fb;
-            fbOk.current=true;
-            pill('#6366f1','⏳ טוען נתונים...');
+        pill('#6366f1','⏳ טוען...');
+        (async()=>{
+            const s = await fsRead('schedule');
+            const m = await fsRead('memory');
+            if(s && Object.keys(s).length > 0){ setSched(s); }
+            else { await save('schedule', DS); }
+            if(m) setMem(m);
+            pill('#10b981','✅ מסונכרן');
 
-            unsubS=onSnapshot(doc(db,'pluga','schedule'),snap=>{
-                try{
-                    if(snap.exists()){
-                        const v=snap.data()?.v;
-                        if(v&&typeof v==='object'&&Object.keys(v).length>0){
-                            fromFB.current=true;
-                            setSched(v);
-                            pill('#10b981','✅ מסונכרן');
-                            setTimeout(()=>{fromFB.current=false;},400);
-                            return;
-                        }
-                    }
-                    /* אין נתונים — כתוב ברירת מחדל */
-                    fbSave('pluga','schedule',{v:DS});
-                }catch(e){console.error('sched snap',e);}
-            },e=>console.error('sched listener',e));
-
-            unsubM=onSnapshot(doc(db,'pluga','memory'),snap=>{
-                try{
-                    if(snap.exists()){
-                        const v=snap.data()?.v;
-                        if(v&&typeof v==='object'){
-                            fromFB.current=true;
-                            setMem(v);
-                            setTimeout(()=>{fromFB.current=false;},400);
-                        }
-                    }
-                }catch(e){console.error('mem snap',e);}
-            },e=>console.error('mem listener',e));
-        }
-
-        if(window.__fbReady===true){startListeners();}
-        else if(window.__fbReady===false){pill('#f97316','⚠️ מצב לא מקוון');}
-        else{window.addEventListener('fbReady',startListeners,{once:true});}
-
-        return()=>{unsubS?.();unsubM?.();};
+            // polling כל 10 שניות — בודק אם מכשיר אחר עדכן
+            const interval = setInterval(async()=>{
+                const fresh = await fsRead('schedule');
+                if(fresh && fresh._ts && fresh._ts > lastSaved.current){
+                    setSched(fresh);
+                    pill('#10b981','✅ עודכן');
+                }
+                const freshM = await fsRead('memory');
+                if(freshM && freshM._ts && freshM._ts > lastSaved.current){
+                    setMem(freshM);
+                }
+            }, 10000);
+            return ()=>clearInterval(interval);
+        })();
     },[]);
 
-    /* ─── שמירה אוטומטית ─── */
-    useEffect(()=>{
-        if(fromFB.current||!fbOk.current)return;
-        const t=setTimeout(()=>fbSave('pluga','schedule',{v:sched}),800);
-        return()=>clearTimeout(t);
-    },[sched]);
+    /* ═══ שמירה ═══ */
+    async function save(doc, data){
+        pill('#f59e0b','💾 שומר...');
+        const ts = Date.now();
+        lastSaved.current = ts;
+        const ok = await fsWrite(doc, {...data, _ts: ts});
+        pill(ok ? '#10b981' : '#ef4444', ok ? '✅ נשמר' : '❌ שגיאת שמירה');
+        return ok;
+    }
 
-    useEffect(()=>{
-        if(fromFB.current||!fbOk.current)return;
-        const t=setTimeout(()=>fbSave('pluga','memory',{v:mem}),800);
-        return()=>clearTimeout(t);
-    },[mem]);
-
-    /* ─── חישובים ─── */
-    const sortedDates=useMemo(()=>sortKeys(sched),[sched]);
-    const visibleDates=useMemo(()=>sortedDates.slice(-3),[sortedDates]);
-    useEffect(()=>{if(visibleDates.length&&!visibleDates.includes(activeDay))setActiveDay(visibleDates[visibleDates.length-1]);},[visibleDates]);
-
-    const report=useMemo(()=>{
-        const r={};
-        SOLDIERS.forEach(n=>{r[n]={days:{},total:0};sortedDates.forEach(d=>r[n].days[d]=0);});
-        Object.entries(sched).forEach(([date,day])=>{
-            (day.patrol||[]).forEach(p=>{if(r[p.c])r[p.c].days[date]+=8;(p.s||[]).forEach(s=>{if(r[s])r[s].days[date]+=8;});});
-            (day.defense||[]).forEach(d=>[d.sg,d.b,d.e,d.d].forEach(n=>{if(r[n])r[n].days[date]+=4;}));
-        });
-        SOLDIERS.forEach(n=>r[n].total=Object.values(r[n].days).reduce((a,b)=>a+b,0));
-        return r;
-    },[sched,sortedDates]);
-
-    /* ─── AI ─── */
-    function runAI(){
+    /* ═══ AI ═══ */
+    async function runAI(){
         const cmd=aiText.trim().toLowerCase();
         let ns=JSON.parse(JSON.stringify(sched));
         let nm=JSON.parse(JSON.stringify(mem));
@@ -248,21 +160,16 @@ function App(){
             if(found.length>=2){
                 const[s1,s2]=found;
                 const day=JSON.parse(JSON.stringify(ns[activeDay]||{}));
-                const sw=arr=>arr.map(x=>{
-                    ['c','sg','b','e','d'].forEach(k=>{if(x[k]===s1)x[k]=s2;else if(x[k]===s2)x[k]=s1;});
-                    if(x.s)x.s=x.s.map(n=>n===s1?s2:n===s2?s1:n);return x;
-                });
+                const sw=arr=>arr.map(x=>{['c','sg','b','e','d'].forEach(k=>{if(x[k]===s1)x[k]=s2;else if(x[k]===s2)x[k]=s1;});if(x.s)x.s=x.s.map(n=>n===s1?s2:n===s2?s1:n);return x;});
                 day.patrol=sw(day.patrol||[]);day.defense=sw(day.defense||[]);day.carmel=sw(day.carmel||[]);
                 if(day.officer===s1)day.officer=s2;else if(day.officer===s2)day.officer=s1;
                 if(day.scout===s1)day.scout=s2;else if(day.scout===s2)day.scout=s1;
                 ns[activeDay]=day;msg=`החלפתי בין ${s1} ל-${s2} ביום ${activeDay}.`;
-            }else{msg="לא מצאתי 2 שמות. נסה: החלף את [שם] ב-[שם]";}
+            }else msg="לא מצאתי 2 שמות. נסה: החלף את [שם] ב-[שם]";
         }
         else if(cmd.includes("מי")||cmd.includes("פנוי")||cmd.includes("חלופה")){
             const day=ns[activeDay]||{};const busy=new Set();
-            [...(day.patrol||[]),...(day.defense||[]),...(day.carmel||[])].forEach(x=>{
-                [x.c,x.sg,x.b,x.e,x.d].forEach(n=>n&&busy.add(n));(x.s||[]).forEach(n=>busy.add(n));
-            });
+            [...(day.patrol||[]),...(day.defense||[]),...(day.carmel||[])].forEach(x=>{[x.c,x.sg,x.b,x.e,x.d].forEach(n=>n&&busy.add(n));(x.s||[]).forEach(n=>busy.add(n));});
             msg=`פנויים ב-${activeDay}: ${SOLDIERS.filter(s=>!busy.has(s)).slice(0,5).join(", ")||"אין"}`;
         }
         else if(cmd.includes("בבית")||cmd.includes("יצא")){
@@ -273,19 +180,38 @@ function App(){
             const name=SOLDIERS.find(s=>cmd.includes(s.toLowerCase()));
             if(name){nm.personnel[name]="בבסיס";msg=`${name} עודכן לבבסיס.`;}
         }
-        else{msg="פקודות: הוסף יום | החלף את X ב-Y | מי פנוי? | X בבית | X חזר";}
+        else msg="פקודות: הוסף יום | החלף את X ב-Y | מי פנוי? | X בבית | X חזר";
 
-        setSched(ns);setMem(nm);setAiMsg(msg);setAiText('');
+        setSched(ns); setMem(nm);
+        setAiMsg(msg); setAiText('');
         setTimeout(()=>setAiMsg(null),8000);
+        await save('schedule', ns);
+        await save('memory', nm);
     }
 
     const onKey=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();runAI();}};
+
     function exportWA(){
         html2canvas(document.getElementById('capture-area'),{scale:2}).then(c=>{
             const a=document.createElement('a');a.download=`שבצק_${activeDay}.png`;a.href=c.toDataURL();a.click();
             window.open('https://web.whatsapp.com/','_blank');
         });
     }
+
+    const sortedDates=useMemo(()=>sortKeys(sched),[sched]);
+    const visibleDates=useMemo(()=>sortedDates.slice(-3),[sortedDates]);
+    useEffect(()=>{if(visibleDates.length&&!visibleDates.includes(activeDay))setActiveDay(visibleDates[visibleDates.length-1]);},[visibleDates]);
+
+    const report=useMemo(()=>{
+        const r={};SOLDIERS.forEach(n=>{r[n]={days:{},total:0};sortedDates.forEach(d=>r[n].days[d]=0);});
+        Object.entries(sched).forEach(([date,day])=>{
+            (day.patrol||[]).forEach(p=>{if(r[p.c])r[p.c].days[date]+=8;(p.s||[]).forEach(s=>{if(r[s])r[s].days[date]+=8;});});
+            (day.defense||[]).forEach(d=>[d.sg,d.b,d.e,d.d].forEach(n=>{if(r[n])r[n].days[date]+=4;}));
+        });
+        SOLDIERS.forEach(n=>r[n].total=Object.values(r[n].days).reduce((a,b)=>a+b,0));
+        return r;
+    },[sched,sortedDates]);
+
     const cur=sched[activeDay]||sched[visibleDates[visibleDates.length-1]]||{};
 
     return(
@@ -369,26 +295,21 @@ function App(){
                 <div className="max-w-[1450px] mx-auto p-10 bg-white mt-10 rounded-[3rem] shadow-2xl overflow-x-auto text-black border-8 border-slate-100">
                     <h2 className="text-6xl font-black mb-12 border-b-8 border-indigo-500 pb-6 text-indigo-900 italic tracking-tighter text-right">דוח ריכוז שעות (שמירה / מנוחה)</h2>
                     <table className="mil-table w-full">
-                        <thead>
-                            <tr style={{background:'#4f46e5',color:'white'}}>
-                                <th className="p-6 text-right text-xl sticky right-0 z-10" style={{background:'#4f46e5',borderBottom:'4px solid #fbbf24'}}>שם הלוחם</th>
-                                {sortedDates.map(d=><th key={d} className="p-4 text-base">{d}</th>)}
-                                <th className="p-6 text-xl text-center" style={{background:'#059669'}}>סה"כ שמירה</th>
-                                <th className="p-6 text-xl text-center" style={{background:'#2563eb'}}>סה"כ מנוחה</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {[...SOLDIERS].sort().map(name=>{
-                                const s=report[name]||{days:{},total:0};
-                                const possible=sortedDates.length*24;
-                                return(<tr key={name} className="hover:bg-indigo-50 font-black">
-                                    <td className="p-5 sticky right-0 bg-white text-right border-l-4 border-slate-200 shadow-xl text-lg italic">{name}</td>
-                                    {sortedDates.map(d=><td key={d} className="font-mono text-sm text-slate-600">{s.days[d]||0} / {24-(s.days[d]||0)}</td>)}
-                                    <td className="bg-emerald-50 text-emerald-800 text-xl text-center border-l-4 border-slate-900">{s.total} ש'</td>
-                                    <td className="bg-blue-50 text-blue-800 text-xl text-center">{possible-s.total} ש'</td>
-                                </tr>);
-                            })}
-                        </tbody>
+                        <thead><tr style={{background:'#4f46e5',color:'white'}}>
+                            <th className="p-6 text-right text-xl sticky right-0 z-10" style={{background:'#4f46e5',borderBottom:'4px solid #fbbf24'}}>שם הלוחם</th>
+                            {sortedDates.map(d=><th key={d} className="p-4 text-base">{d}</th>)}
+                            <th className="p-6 text-xl text-center" style={{background:'#059669'}}>סה"כ שמירה</th>
+                            <th className="p-6 text-xl text-center" style={{background:'#2563eb'}}>סה"כ מנוחה</th>
+                        </tr></thead>
+                        <tbody>{[...SOLDIERS].sort().map(name=>{
+                            const s=report[name]||{days:{},total:0};const possible=sortedDates.length*24;
+                            return(<tr key={name} className="hover:bg-indigo-50 font-black">
+                                <td className="p-5 sticky right-0 bg-white text-right border-l-4 border-slate-200 shadow-xl text-lg italic">{name}</td>
+                                {sortedDates.map(d=><td key={d} className="font-mono text-sm text-slate-600">{s.days[d]||0} / {24-(s.days[d]||0)}</td>)}
+                                <td className="bg-emerald-50 text-emerald-800 text-xl text-center border-l-4 border-slate-900">{s.total} ש'</td>
+                                <td className="bg-blue-50 text-blue-800 text-xl text-center">{possible-s.total} ש'</td>
+                            </tr>);
+                        })}</tbody>
                     </table>
                 </div>
             )}
@@ -400,9 +321,7 @@ function App(){
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-16">
                         <div className="space-y-8">
                             <h3 className="text-4xl font-black text-slate-800 underline uppercase italic border-r-8 border-indigo-500 pr-6 text-right">חוקים שנלמדו</h3>
-                            {(mem.rules||[]).map((rule,i)=>(
-                                <div key={i} className="p-8 bg-indigo-50 rounded-[2rem] border-r-[12px] border-indigo-500 font-bold text-indigo-900 text-2xl shadow-xl italic hover:scale-105 transition text-right">{rule}</div>
-                            ))}
+                            {(mem.rules||[]).map((rule,i)=><div key={i} className="p-8 bg-indigo-50 rounded-[2rem] border-r-[12px] border-indigo-500 font-bold text-indigo-900 text-2xl shadow-xl italic hover:scale-105 transition text-right">{rule}</div>)}
                         </div>
                         <div className="space-y-8">
                             <h3 className="text-4xl font-black text-slate-800 underline uppercase italic border-r-8 border-emerald-500 pr-6 text-right">סטטוס כוח אדם</h3>
@@ -422,7 +341,6 @@ function App(){
         </div>
     );
 }
-
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
